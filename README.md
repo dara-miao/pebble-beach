@@ -7,8 +7,8 @@ Video-game look, real course layout. Routing and yardages track Pebble; the scen
 ## Quick start
 
 ```bash
-git clone https://github.com/dara-miao/golfcourse.git
-cd golfcourse
+git clone https://github.com/dara-miao/pebble-beach.git
+cd pebble-beach
 npm install
 npm run dev
 ```
