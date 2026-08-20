@@ -1,5 +1,6 @@
 {
   "name": "golf-course",
+  "description": "Pebble Beach shot preview — see how a shot plays from this lie.",
   "private": true,
   "version": "0.1.0",
   "type": "module",
