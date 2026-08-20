@@ -1,8 +1,8 @@
 import "./style.css";
 import * as THREE from "three";
-import courseJson from "./course/pebble-beach.json";
-import type { CourseData, HoleData } from "./course/types";
-import { holeByNumber } from "./course/geom";
+import type { HoleData } from "./course/types";
+import { defaultFairwayTarget, holeByNumber, OPENING_HOLE } from "./course/geom";
+import { loadCourse } from "./course/load";
 import { createTerrain } from "./scene/terrain";
 import { createOcean, createSky, sunFromTime } from "./scene/atmosphere";
 import { addCourseFeatures, addYardageMarkers } from "./scene/features";
@@ -19,7 +19,7 @@ import { lieLabel } from "./shot/lie";
 import { bookFromHere, suggestShot } from "./shot/yardage";
 import { clearAimVisual, clearPreviewVisual, playShotVisual, showPreviewVisual, upsertAimVisual, upsertLieMarker, type ShotVisual } from "./shot/visual";
 
-const course = courseJson as unknown as CourseData;
+const course = loadCourse();
 
 const canvas = document.querySelector<HTMLCanvasElement>("#view")!;
 const hudEl = document.querySelector<HTMLElement>("#hud")!;
@@ -159,7 +159,7 @@ let shotInfo: ShotHudInfo | undefined;
 let draftPrompt = "";
 let previewTimer = 0;
 
-const state: HudState = { hole: 7, tee: "blue", camera: "address" };
+const state: HudState = { hole: OPENING_HOLE, tee: "blue", camera: "address" };
 const plays = new Map<number, HolePlay>();
 const winds = new Map<number, WindCondition>();
 let round: RoundCard = createRound(course, state.tee);
@@ -226,18 +226,24 @@ function playView(): PlayHudView {
   };
 }
 
+function implicitTarget(origin: { x: number; z: number }, hole: ReturnType<typeof activeHole>, carryYards?: number) {
+  return aimTarget ?? defaultFairwayTarget(hole, origin, carryYards);
+}
+
 function currentAim(origin: { x: number; z: number }, hole: ReturnType<typeof activeHole>) {
   return resolveAim(hole, origin, {
     aimYardsLeft: 0,
     landYards: undefined,
-    target: aimTarget ?? undefined,
+    target: implicitTarget(origin, hole),
   });
 }
 
 function lookAtPoint(): [number, number] {
   if (aimTarget) return [aimTarget.x, aimTarget.z];
   const hole = activeHole();
-  return [hole.pin[0], hole.pin[1]];
+  const { origin } = resolveOrigin(play, hole, terrain.coverAt);
+  const target = defaultFairwayTarget(hole, origin);
+  return [target.x, target.z];
 }
 
 function setCamera(mode = state.camera) {
@@ -310,6 +316,7 @@ function resetHole() {
 function newRound() {
   plays.clear();
   round = resetRound(round);
+  state.hole = OPENING_HOLE;
   adoptPlay(createPlay());
   shotInfo = undefined;
   aimTarget = null;
@@ -318,8 +325,12 @@ function newRound() {
   clearAimVisual(scene);
   const old = scene.getObjectByName("shot-visual");
   old?.parent?.remove(old);
+  const hole = activeHole();
+  markers.removeFromParent();
+  markers = addYardageMarkers(scene, hole, terrain.heightAt);
   placeLieMarker(true);
   setCamera();
+  fitShadow(hole);
   refreshHud();
 }
 
@@ -361,14 +372,14 @@ function applyHole(next: Partial<HudState>) {
 
 function composeRequest(prompt: string) {
   const req = parseShotPrompt(prompt);
-  if (aimTarget && !promptSpecifiesAim(prompt)) {
-    req.target = { x: aimTarget.x, z: aimTarget.z };
-    const hole = activeHole();
-    const { origin } = resolveOrigin(play, hole, terrain.coverAt);
-    const aimed = resolveAim(hole, origin, { aimYardsLeft: 0, target: req.target });
-    req.aimYardsLeft = Math.round(aimed.leftYards);
-    req.landYards = Math.round(Math.hypot(aimTarget.x - origin.x, aimTarget.z - origin.z));
-  }
+  if (promptSpecifiesAim(prompt) && !aimTarget) return req;
+  const hole = activeHole();
+  const { origin } = resolveOrigin(play, hole, terrain.coverAt);
+  const target = implicitTarget(origin, hole, req.carryYards);
+  req.target = { x: target.x, z: target.z };
+  const aimed = resolveAim(hole, origin, { aimYardsLeft: 0, target: req.target });
+  req.aimYardsLeft = Math.round(aimed.leftYards);
+  req.landYards = Math.round(Math.hypot(target.x - origin.x, target.z - origin.z));
   return req;
 }
 

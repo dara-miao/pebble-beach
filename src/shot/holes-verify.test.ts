@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import courseJson from "../course/pebble-beach.json";
-import type { CourseData } from "../course/types";
 import { holeByNumber } from "../course/geom";
+import { loadCourse } from "../course/load";
 import { buildCoverIndex, heightAt as sampleHeight } from "../scene/cover";
 import { parseShotPrompt } from "./parse";
 import { applyShotResult, createHolePlay, pinDistance3d, resolveOrigin } from "./play";
@@ -15,7 +14,7 @@ import { bookFromHere, clearStatus, suggestShot } from "./yardage";
  * Stand on the lie, pick a landing, read leftover + hazard-clear, take the
  * suggested club, preview the real flight, hit, and see the hole story grow.
  */
-const course = courseJson as unknown as CourseData;
+const course = loadCourse();
 const index = buildCoverIndex(course);
 const heightAt = (x: number, z: number) => sampleHeight(course, index, x, z).y;
 const coverAt = (x: number, z: number) => sampleHeight(course, index, x, z).cover;
