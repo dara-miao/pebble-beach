@@ -114,8 +114,8 @@ export function holeByNumber(course: CourseData, n: number): HoleData {
   return hole;
 }
 
-/** First tee of the round — the Lodge opener, not the hole-7 test hole. */
-export const OPENING_HOLE = 1;
+/** First tee of the round — hole 9 (coast stretch) for a strong opening view. */
+export const OPENING_HOLE = 9;
 
 /**
  * Default landing on the hole's play line. Pin-line aim cuts doglegs

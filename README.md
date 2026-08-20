@@ -13,7 +13,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:5173/](http://localhost:5173/). Starts on **hole 1** (the Lodge opener).
+Open [http://localhost:5173/](http://localhost:5173/). Starts on **hole 9**.
 
 ```bash
 npm test
@@ -66,7 +66,7 @@ Drag to orbit, right-drag to pan, scroll to zoom. Arrow keys change holes. `r` r
 
 ### Round
 
-Play all 18. Scores sync per hole. **New round** resets back to hole 1.
+Play all 18. Scores sync per hole. **New round** resets back to hole 9.
 
 ## Real vs stylized
 

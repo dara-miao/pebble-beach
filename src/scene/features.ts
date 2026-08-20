@@ -10,13 +10,15 @@ function shapeFromPoly(poly: Vec2[]): THREE.Shape {
 }
 
 function drapeGeometry(geo: THREE.BufferGeometry, heightAt: (x: number, z: number) => number, lift: number) {
-  geo.rotateX(-Math.PI / 2);
+  // ShapeGeometry is in XY. Map shape Y → world Z directly (do not rotateX:
+  // that would negate Z and leave greens/bunkers mirrored over the bay).
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
-    const z = pos.getZ(i);
-    pos.setY(i, heightAt(x, z) + lift);
+    const z = pos.getY(i);
+    pos.setXYZ(i, x, heightAt(x, z) + lift, z);
   }
+  pos.needsUpdate = true;
   geo.computeVertexNormals();
 }
 

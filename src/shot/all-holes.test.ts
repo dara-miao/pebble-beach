@@ -33,12 +33,12 @@ function playableTeeShot(holeNumber: number) {
 }
 
 describe("opening hole", () => {
-  it("starts the round on hole 1, not the hole-7 test hole", () => {
-    expect(OPENING_HOLE).toBe(1);
+  it("starts the round on hole 9", () => {
+    expect(OPENING_HOLE).toBe(9);
     expect(course.holes[0]?.number).toBe(1);
     const hole = holeByNumber(course, OPENING_HOLE);
     const play = createHolePlay(hole, "blue", coverAt);
-    expect(play.holeNumber).toBe(1);
+    expect(play.holeNumber).toBe(9);
     expect(play.ball.x).toBe(hole.tee[0]);
     expect(play.ball.z).toBe(hole.tee[1]);
     expect(play.strokes).toBe(0);
@@ -191,10 +191,10 @@ describe("hole change keeps the card", () => {
     expect(roundThru(card).played).toBe(0);
   });
 
-  it("New round / reset-to-start is hole 1", () => {
-    expect(OPENING_HOLE).toBe(1);
+  it("New round / reset-to-start is hole 9", () => {
+    expect(OPENING_HOLE).toBe(9);
     const start = createHolePlay(holeByNumber(course, OPENING_HOLE), "blue", coverAt);
-    expect(start.holeNumber).toBe(1);
+    expect(start.holeNumber).toBe(9);
     expect(start.ball.lie).not.toBe("ocean");
     expect(start.ball.remainingYards).toBeGreaterThan(300);
   });
