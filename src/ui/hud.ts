@@ -89,100 +89,114 @@ export function renderHud(
   const placeholder = play.suggestion.prompt;
 
   el.innerHTML = `
-    <div class="panel brand">
-      <p class="kicker">${course.location}</p>
-      <h1>${course.name}</h1>
-      <div class="meta">
-        <span>Par ${course.par}</span>
-        <span class="dot"></span>
-        <span>${course.scorecard[state.tee].total.toLocaleString()} yds</span>
-        <span class="dot"></span>
-        <span>${teeName}</span>
+    <div class="hud-scroll">
+      <div class="panel brand">
+        <p class="kicker">${course.location}</p>
+        <h1>${course.name}</h1>
+        <div class="meta">
+          <span>Par ${course.par}</span>
+          <span class="dot"></span>
+          <span>${course.scorecard[state.tee].total.toLocaleString()} yds</span>
+          <span class="dot"></span>
+          <span>${teeName}</span>
+        </div>
       </div>
-    </div>
 
-    <div class="panel hole">
-      <div class="hole-head">
-        <div class="hole-num">
-          <span>Hole</span>
-          <strong>${hole.number}</strong>
+      <div class="panel hole">
+        <div class="hole-head">
+          <div class="hole-num">
+            <span>Hole</span>
+            <strong>${hole.number}</strong>
+          </div>
+          <div class="stats">
+            <div><em>Par</em><b>${hole.par}</b></div>
+            <div><em>Yards</em><b>${yards}</b></div>
+            <div><em>HCP</em><b>${hole.handicap}</b></div>
+          </div>
         </div>
-        <div class="stats">
-          <div><em>Par</em><b>${hole.par}</b></div>
-          <div><em>Yards</em><b>${yards}</b></div>
-          <div><em>HCP</em><b>${hole.handicap}</b></div>
+        <p class="note">${hole.note}</p>
+        <div class="play-status">
+          <div class="play-stat">
+            <em>Now</em>
+            <b>${play.holed ? `Holed in ${play.strokes}` : `Shot ${play.strokes + 1}`}</b>
+          </div>
+          <div class="play-stat">
+            <em>Lie</em>
+            <b class="lie-badge lie-${play.lie}">${play.lieLabel}</b>
+          </div>
+          <div class="play-stat">
+            <em>Left</em>
+            <b>${play.holed ? "Holed" : play.leftoverLabel.replace(" to pin", "")}</b>
+          </div>
         </div>
+        ${shotListHtml(play)}
       </div>
-      <p class="note">${hole.note}</p>
-      <div class="play-status">
-        <div class="play-stat">
-          <em>Now</em>
-          <b>${play.holed ? `Holed in ${play.strokes}` : `Shot ${play.strokes + 1}`}</b>
-        </div>
-        <div class="play-stat">
-          <em>Lie</em>
-          <b class="lie-badge lie-${play.lie}">${play.lieLabel}</b>
-        </div>
-        <div class="play-stat">
-          <em>Left</em>
-          <b>${play.holed ? "Holed" : play.leftoverLabel.replace(" to pin", "")}</b>
-        </div>
-      </div>
-      ${shotListHtml(play)}
-    </div>
 
-    <nav class="holes">
-      ${holes
-        .map((n) => {
-          const card = play.round.holes.find((h) => h.number === n);
-          const posted = card?.strokes != null;
-          return `<button type="button" class="${n === hole.number ? "on" : ""} ${posted ? "posted" : ""}" data-hole="${n}">${n}${posted ? `<small>${card!.strokes}</small>` : ""}</button>`;
-        })
-        .join("")}
-    </nav>
-    ${scorecardHtml(play, hole.number)}
+      <nav class="holes">
+        ${holes
+          .map((n) => {
+            const card = play.round.holes.find((h) => h.number === n);
+            const posted = card?.strokes != null;
+            return `<button type="button" class="${n === hole.number ? "on" : ""} ${posted ? "posted" : ""}" data-hole="${n}">${n}${posted ? `<small>${card!.strokes}</small>` : ""}</button>`;
+          })
+          .join("")}
+      </nav>
+      ${scorecardHtml(play, hole.number)}
 
-    <div class="panel controls">
-      <div class="control-block">
-        <span class="label">Tees</span>
-        <div class="seg tee-seg">
-          ${TEE_ORDER.map(
-            (t) =>
-              `<button type="button" data-tee="${t}" class="tee-${t} ${state.tee === t ? "on" : ""}">${TEE_LABELS[t]}</button>`,
-          ).join("")}
+      <div class="panel controls">
+        <div class="control-block">
+          <span class="label">Tees</span>
+          <div class="seg tee-seg">
+            ${TEE_ORDER.map(
+              (t) =>
+                `<button type="button" data-tee="${t}" class="tee-${t} ${state.tee === t ? "on" : ""}">${TEE_LABELS[t]}</button>`,
+            ).join("")}
+          </div>
+        </div>
+        <div class="control-block">
+          <span class="label">Camera</span>
+          <div class="seg cam-seg">
+            <button type="button" data-cam="address" class="${state.camera === "address" ? "on" : ""}">Stand</button>
+            <button type="button" data-cam="tee" class="${state.camera === "tee" ? "on" : ""}">Tee</button>
+            <button type="button" data-cam="flyover" class="${state.camera === "flyover" ? "on" : ""}">Fly</button>
+            <button type="button" data-cam="green" class="${state.camera === "green" ? "on" : ""}">Green</button>
+            <button type="button" data-cam="overview" class="${state.camera === "overview" ? "on" : ""}">Course</button>
+          </div>
+        </div>
+        <div class="control-block">
+          <span class="label">Wind</span>
+          <div class="seg wind-seg">
+            ${WIND_FROM.map(
+              (d) =>
+                `<button type="button" data-wind-from="${d}" class="${play.wind.from === d ? "on" : ""}">${d}</button>`,
+            ).join("")}
+          </div>
+          <div class="wind-mph">
+            <button type="button" data-wind-mph-delta="-2" ${play.wind.mph <= 0 ? "disabled" : ""}>−</button>
+            <b>${play.wind.mph === 0 ? "Still" : `${play.wind.mph} mph`}</b>
+            <button type="button" data-wind-mph-delta="2" ${play.wind.mph >= 32 ? "disabled" : ""}>+</button>
+            ${[0, 8, 14, 20]
+              .map(
+                (n) =>
+                  `<button type="button" data-wind-mph="${n}" class="${play.wind.mph === n ? "on" : ""}">${n === 0 ? "0" : n}</button>`,
+              )
+              .join("")}
+          </div>
+          <p class="wind-on-shot">${play.windOnShot}</p>
         </div>
       </div>
-      <div class="control-block">
-        <span class="label">Camera</span>
-        <div class="seg cam-seg">
-          <button type="button" data-cam="address" class="${state.camera === "address" ? "on" : ""}">Stand</button>
-          <button type="button" data-cam="tee" class="${state.camera === "tee" ? "on" : ""}">Tee</button>
-          <button type="button" data-cam="flyover" class="${state.camera === "flyover" ? "on" : ""}">Fly</button>
-          <button type="button" data-cam="green" class="${state.camera === "green" ? "on" : ""}">Green</button>
-          <button type="button" data-cam="overview" class="${state.camera === "overview" ? "on" : ""}">Course</button>
+
+      <div class="panel book">
+        <div class="book-head">
+          <h2>From here</h2>
         </div>
+        <canvas class="mini" width="340" height="140"></canvas>
+        <ul class="book-list">
+          ${bookListHtml(play, shot, yards)}
+        </ul>
       </div>
-      <div class="control-block">
-        <span class="label">Wind</span>
-        <div class="seg wind-seg">
-          ${WIND_FROM.map(
-            (d) =>
-              `<button type="button" data-wind-from="${d}" class="${play.wind.from === d ? "on" : ""}">${d}</button>`,
-          ).join("")}
-        </div>
-        <div class="wind-mph">
-          <button type="button" data-wind-mph-delta="-2" ${play.wind.mph <= 0 ? "disabled" : ""}>−</button>
-          <b>${play.wind.mph === 0 ? "Still" : `${play.wind.mph} mph`}</b>
-          <button type="button" data-wind-mph-delta="2" ${play.wind.mph >= 32 ? "disabled" : ""}>+</button>
-          ${[0, 8, 14, 20]
-            .map(
-              (n) =>
-                `<button type="button" data-wind-mph="${n}" class="${play.wind.mph === n ? "on" : ""}">${n === 0 ? "0" : n}</button>`,
-            )
-            .join("")}
-        </div>
-        <p class="wind-on-shot">${play.windOnShot}</p>
-      </div>
+
+      <p class="hint">Stand looks down the line · click to aim · miss envelope is the slight miss · ${play.suggestion.label} · r resets hole</p>
     </div>
 
     <div class="panel shot">
@@ -212,18 +226,6 @@ export function renderHud(
       </div>
       <div class="shot-panel">${shotPanelHtml(shot, play)}</div>
     </div>
-
-    <div class="panel book">
-      <div class="book-head">
-        <h2>From here</h2>
-      </div>
-      <canvas class="mini" width="340" height="140"></canvas>
-      <ul class="book-list">
-        ${bookListHtml(play, shot, yards)}
-      </ul>
-    </div>
-
-    <p class="hint">Stand looks down the line · click to aim · miss envelope is the slight miss · ${play.suggestion.label} · r resets hole</p>
   `;
 
   el.querySelectorAll<HTMLButtonElement>("[data-hole]").forEach((btn) => {
