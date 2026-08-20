@@ -5,6 +5,8 @@ import { holeByNumber } from "../course/geom";
 import { buildCoverIndex, heightAt as sampleHeight } from "../scene/cover";
 import { parseShotPrompt } from "./parse";
 import { applyShotResult, createHolePlay, pinDistance3d, resolveOrigin } from "./play";
+import { missShowsHazard, simulateMissEnvelope } from "./miss";
+import { createRound, resetRound, roundThru, syncHoleScore } from "./round";
 import { aimFromPoint, simulateShot } from "./simulate";
 import { bookFromHere, clearStatus, suggestShot } from "./yardage";
 
@@ -115,5 +117,75 @@ describe("hole 7 / hole 8 verify script", () => {
     expect(after.ball.lie).toBe("ocean");
     expect(resolveOrigin(after, holeByNumber(course, 7), coverAt).dropped).toBe(true);
     expect(after.shots[0].penalty).toBe(1);
+  });
+
+  it("hole 7: miss envelope shows bunker or ocean while a conservative line stays safe", () => {
+    const hole = holeByNumber(course, 7);
+    const play = createHolePlay(hole, "blue", coverAt);
+    const atGreen = simulateMissEnvelope(hole, parseShotPrompt("8 iron 100"), heightAt, coverAt, play.ball);
+    expect(atGreen.samples).toHaveLength(4);
+    expect(atGreen.called.trouble.bunker).toBe(false);
+    expect(atGreen.called.trouble.ocean).toBe(false);
+    expect(atGreen.called.landLie).toBe("green");
+    expect(missShowsHazard(atGreen, "bunker")).toBe(true);
+    expect(atGreen.copy.toLowerCase()).toMatch(/bunker/);
+    expect(atGreen.samples.find((s) => s.kind === "long")?.trouble.bunker).toBe(true);
+
+    const shortRight = simulateMissEnvelope(hole, parseShotPrompt("pw 50"), heightAt, coverAt, play.ball);
+    expect(missShowsHazard(shortRight, "ocean") || shortRight.called.trouble.ocean).toBe(true);
+    expect(shortRight.copy.toLowerCase()).toMatch(/ocean/);
+
+    const safe = simulateMissEnvelope(hole, parseShotPrompt("pw 60 8 left"), heightAt, coverAt, play.ball);
+    expect(safe.called.landLie).not.toBe("ocean");
+    expect(safe.called.landLie).not.toBe("bunker");
+    expect(safe.safe).toBe(true);
+    expect(safe.copy).toBe("Miss stays safe");
+    expect(missShowsHazard(safe, "bunker")).toBe(false);
+    expect(missShowsHazard(safe, "ocean")).toBe(false);
+
+    const hit = simulateShot(hole, parseShotPrompt("8 iron 100"), heightAt, coverAt, play.ball);
+    expect(hit.end.x).toBeCloseTo(atGreen.called.end.x, 8);
+    expect(hit.landLie).toBe(atGreen.called.landLie);
+  });
+
+  it("hole 8: wind changes carry and leftover; scorecard survives the hole change", () => {
+    const eight = holeByNumber(course, 8);
+    const seven = holeByNumber(course, 7);
+    let play = createHolePlay(eight, "blue", coverAt);
+    const req = parseShotPrompt("driver 250");
+    const still = simulateShot(eight, req, heightAt, coverAt, play.ball, false, { mph: 0, from: "W" });
+    const into = simulateShot(eight, req, heightAt, coverAt, play.ball, false, { mph: 16, from: "E" });
+    const down = simulateShot(eight, req, heightAt, coverAt, play.ball, false, { mph: 16, from: "W" });
+    expect(into.carryYards).toBeLessThan(still.carryYards);
+    expect(down.carryYards).toBeGreaterThan(still.carryYards);
+    expect(down.remainingYards).toBeLessThan(still.remainingYards - 8);
+    expect(Math.hypot(into.end.x - still.end.x, into.end.z - still.end.z)).toBeGreaterThan(2);
+    expect(Math.hypot(down.end.x - still.end.x, down.end.z - still.end.z)).toBeGreaterThan(12);
+    expect(into.wind.alongMph).toBeLessThan(0);
+    expect(down.wind.alongMph).toBeGreaterThan(0);
+
+    const windEnv = simulateMissEnvelope(eight, req, heightAt, coverAt, play.ball, false, { mph: 16, from: "W" });
+    expect(windEnv.called.carryYards).toBe(down.carryYards);
+    expect(windEnv.samples).toHaveLength(4);
+
+    play = applyShotResult(play, still, eight, coverAt);
+    const left = pinDistance3d(play.ball.x, play.ball.z, eight);
+    expect(play.ball.remainingYards).toBeCloseTo(left, 5);
+    expect(left).toBeGreaterThan(120);
+
+    let card = createRound(course, "blue");
+    card = syncHoleScore(card, 8, play.strokes, play.ball.holed);
+    const sevenHit = simulateShot(seven, parseShotPrompt("pw 80"), heightAt, coverAt, createHolePlay(seven, "blue", coverAt).ball);
+    const sevenPlay = applyShotResult(createHolePlay(seven, "blue", coverAt), sevenHit, seven, coverAt);
+    card = syncHoleScore(card, 7, sevenPlay.strokes, sevenPlay.ball.holed);
+    const thru = roundThru(card);
+    expect(card.holes.find((h) => h.number === 8)?.strokes).toBe(play.strokes);
+    expect(card.holes.find((h) => h.number === 7)?.strokes).toBe(sevenPlay.strokes);
+    expect(thru.played).toBe(2);
+    expect(thru.strokes).toBe(play.strokes + sevenPlay.strokes);
+    expect(thru.par).toBe(seven.par + eight.par);
+
+    card = resetRound(card);
+    expect(roundThru(card).played).toBe(0);
   });
 });

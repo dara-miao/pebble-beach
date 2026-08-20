@@ -5,6 +5,7 @@ import type { ShotRequest } from "./parse";
 import type { Cover } from "../scene/cover";
 import { applyLieToCarry, classifyLie, type Lie } from "./lie";
 import { formatLeftover, isHoledOut, type BallState } from "./play";
+import { resolveFlightWind, type WindCondition } from "./wind";
 
 export interface ShotPoint {
   position: THREE.Vector3;
@@ -42,6 +43,7 @@ export interface ShotResult {
   penaltyStrokes: number;
   trouble: ShotTrouble;
   aim: { ux: number; uz: number; leftYards: number; target: { x: number; z: number } };
+  wind: { alongMph: number; crossLeftMph: number; carryAdj: number };
 }
 
 function shapeLateral(shape: ShotRequest["shape"], t: number, carry: number): number {
@@ -172,6 +174,7 @@ export function simulateShot(
   coverAt: (x: number, z: number) => Cover,
   origin: BallState,
   dropped = false,
+  holeWind?: WindCondition | null,
 ): ShotResult {
   const path = hole.path.length >= 2 ? hole.path : [hole.tee, hole.greenCenter];
   const pin: [number, number] = [hole.pin[0], hole.pin[1]];
@@ -179,8 +182,10 @@ export function simulateShot(
   const { ux, uz, rx, rz } = aim;
 
   const isPutt = req.club === "putter";
-  const windAdj = isPutt ? 0 : req.windMph < 0 ? Math.abs(req.windMph) * 1.4 : req.windMph > 0 ? -req.windMph * 1.1 : 0;
-  const requested = Math.max(isPutt ? 0.6 : 8, req.carryYards + windAdj);
+  const flightWind = isPutt
+    ? { alongMph: 0, crossLeftMph: 0, carryAdj: 0, cross: 0 }
+    : resolveFlightWind(req, ux, uz, holeWind);
+  const requested = Math.max(isPutt ? 0.6 : 8, req.carryYards + flightWind.carryAdj);
   const { carry: lieCarry, effect } = applyLieToCarry(origin.lie, req.club, requested);
 
   const elev = isPutt ? 0 : elevationDelta(origin, ux, uz, lieCarry, heightAt, coverAt);
@@ -204,7 +209,7 @@ export function simulateShot(
         return roll * effect.rollScale;
       })();
 
-  const cross = isPutt ? 0 : (req.windMph > 0 ? req.windMph : 0) * (req.windFromLeft ? 0.55 : -0.55);
+  const cross = flightWind.cross;
   const launch = isPutt ? 0.008 : req.club === "driver" || req.club.includes("wood") ? 0.22 : 0.28;
   const peakHeight = isPutt
     ? 0.35
@@ -343,5 +348,6 @@ export function simulateShot(
     penaltyStrokes,
     trouble,
     aim: { ux, uz, leftYards: aim.leftYards, target: aim.target },
+    wind: { alongMph: flightWind.alongMph, crossLeftMph: flightWind.crossLeftMph, carryAdj: flightWind.carryAdj },
   };
 }

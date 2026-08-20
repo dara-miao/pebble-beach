@@ -1,6 +1,8 @@
 import type { CourseData, HoleData, TeeSet, CameraMode, Vec2 } from "../course/types";
 import type { Lie } from "../shot/lie";
 import type { HoleShot } from "../shot/play";
+import type { RoundCard, RoundThru } from "../shot/round";
+import { WIND_FROM, type WindCondition, type WindFrom } from "../shot/wind";
 import { lieShort, type HereBook } from "../shot/yardage";
 
 export interface HudState {
@@ -24,6 +26,9 @@ export interface ShotHudInfo {
   land?: Vec2;
   target?: Vec2;
   plannedCarry?: number;
+  miss?: string;
+  missDanger?: boolean;
+  missLandings?: Vec2[];
 }
 
 export interface PlayHudView {
@@ -42,6 +47,10 @@ export interface PlayHudView {
   book: HereBook;
   suggestion: { label: string; prompt: string };
   cardYards: number;
+  wind: WindCondition;
+  windOnShot: string;
+  round: RoundCard;
+  thru: RoundThru;
 }
 
 export interface HudHandlers {
@@ -49,6 +58,8 @@ export interface HudHandlers {
   onShot: (prompt: string) => void;
   onPreview: (prompt: string) => void;
   onReset: () => void;
+  onWind: (next: Partial<WindCondition>) => void;
+  onNewRound: () => void;
 }
 
 const TEE_LABELS: Record<TeeSet, string> = {
@@ -121,12 +132,14 @@ export function renderHud(
 
     <nav class="holes">
       ${holes
-        .map(
-          (n) =>
-            `<button type="button" class="${n === hole.number ? "on" : ""}" data-hole="${n}">${n}</button>`,
-        )
+        .map((n) => {
+          const card = play.round.holes.find((h) => h.number === n);
+          const posted = card?.strokes != null;
+          return `<button type="button" class="${n === hole.number ? "on" : ""} ${posted ? "posted" : ""}" data-hole="${n}">${n}${posted ? `<small>${card!.strokes}</small>` : ""}</button>`;
+        })
         .join("")}
     </nav>
+    ${scorecardHtml(play)}
 
     <div class="panel controls">
       <div class="control-block">
@@ -148,12 +161,36 @@ export function renderHud(
           <button type="button" data-cam="overview" class="${state.camera === "overview" ? "on" : ""}">Course</button>
         </div>
       </div>
+      <div class="control-block">
+        <span class="label">Wind</span>
+        <div class="seg wind-seg">
+          ${WIND_FROM.map(
+            (d) =>
+              `<button type="button" data-wind-from="${d}" class="${play.wind.from === d ? "on" : ""}">${d}</button>`,
+          ).join("")}
+        </div>
+        <div class="wind-mph">
+          <button type="button" data-wind-mph-delta="-2">−</button>
+          <b>${play.wind.mph === 0 ? "Still" : `${play.wind.mph} mph`}</b>
+          <button type="button" data-wind-mph-delta="2">+</button>
+          ${[0, 8, 14, 20]
+            .map(
+              (n) =>
+                `<button type="button" data-wind-mph="${n}" class="${play.wind.mph === n ? "on" : ""}">${n === 0 ? "0" : n}</button>`,
+            )
+            .join("")}
+        </div>
+        <p class="wind-on-shot">${play.windOnShot}</p>
+      </div>
     </div>
 
     <div class="panel shot">
       <div class="shot-head">
         <h2>Call your shot</h2>
-        <button type="button" class="reset" data-reset>Reset hole</button>
+        <div class="shot-actions">
+          <button type="button" class="reset" data-reset>Reset hole</button>
+          <button type="button" class="reset" data-new-round>New round</button>
+        </div>
       </div>
       <form class="shot-form">
         <input
@@ -185,7 +222,7 @@ export function renderHud(
       </ul>
     </div>
 
-    <p class="hint">Stand looks down the line · click the hole to aim · ${play.suggestion.label} · r resets</p>
+    <p class="hint">Stand looks down the line · click to aim · miss envelope is the slight miss · ${play.suggestion.label} · r resets hole</p>
   `;
 
   el.querySelectorAll<HTMLButtonElement>("[data-hole]").forEach((btn) => {
@@ -206,6 +243,16 @@ export function renderHud(
     };
   });
   el.querySelector<HTMLButtonElement>("[data-reset]")!.onclick = () => handlers.onReset();
+  el.querySelector<HTMLButtonElement>("[data-new-round]")!.onclick = () => handlers.onNewRound();
+  el.querySelectorAll<HTMLButtonElement>("[data-wind-from]").forEach((btn) => {
+    btn.onclick = () => handlers.onWind({ from: btn.dataset.windFrom as WindFrom });
+  });
+  el.querySelectorAll<HTMLButtonElement>("[data-wind-mph]").forEach((btn) => {
+    btn.onclick = () => handlers.onWind({ mph: Number(btn.dataset.windMph) });
+  });
+  el.querySelectorAll<HTMLButtonElement>("[data-wind-mph-delta]").forEach((btn) => {
+    btn.onclick = () => handlers.onWind({ mph: play.wind.mph + Number(btn.dataset.windMphDelta) });
+  });
 
   const form = el.querySelector<HTMLFormElement>(".shot-form");
   const input = el.querySelector<HTMLInputElement>("input[name=prompt]");
@@ -237,7 +284,7 @@ export function updateShotPanel(
   const book = el.querySelector(".book-list");
   if (book) book.innerHTML = bookListHtml(play, shot, play.cardYards);
   const hint = el.querySelector(".hint");
-  if (hint) hint.textContent = `Stand looks down the line · click the hole to aim · ${play.suggestion.label} · r resets`;
+  if (hint) hint.textContent = `Stand looks down the line · click to aim · miss envelope is the slight miss · ${play.suggestion.label} · r resets hole`;
 }
 
 function shotPanelHtml(shot: ShotHudInfo | undefined, play: PlayHudView): string {
@@ -259,6 +306,28 @@ function shotPanelHtml(shot: ShotHudInfo | undefined, play: PlayHudView): string
       <div><em>Peak</em><b>${shot.peak}<small>y</small></b></div>
       <div><em>Left</em><b>${shot.leftoverLabel ?? shot.leftover}</b></div>
     </div>
+    ${shot.miss ? `<p class="miss-line ${shot.missDanger ? "danger" : "safe"}">${shot.miss}</p>` : ""}
+  </div>`;
+}
+
+function scorecardHtml(play: PlayHudView): string {
+  const front = play.round.holes.filter((h) => h.number <= 9);
+  const back = play.round.holes.filter((h) => h.number >= 10);
+  const row = (holes: typeof front, title: string) => {
+    const par = holes.reduce((n, h) => n + h.par, 0);
+    const strokes = holes.every((h) => h.strokes == null) ? "—" : String(holes.reduce((n, h) => n + (h.strokes ?? 0), 0));
+    return `<div class="score-nine">
+      <div class="score-row ids"><em>${title}</em>${holes.map((h) => `<span>${h.number}</span>`).join("")}<span>Tot</span></div>
+      <div class="score-row par"><em>Par</em>${holes.map((h) => `<span>${h.par}</span>`).join("")}<span>${par}</span></div>
+      <div class="score-row strokes"><em>Strokes</em>${holes
+        .map((h) => `<span class="${h.completed ? "done" : ""}">${h.strokes ?? "·"}</span>`)
+        .join("")}<span>${strokes}</span></div>
+    </div>`;
+  };
+  return `<div class="panel scorecard">
+    ${row(front, "Out")}
+    ${row(back, "In")}
+    <p class="round-line">Round <b>${play.thru.label}</b>${play.thru.played ? ` · ${play.thru.strokes} thru ${play.thru.played}` : ""} · par ${play.thru.played ? play.thru.par : "—"}</p>
   </div>`;
 }
 
@@ -340,6 +409,7 @@ function drawMinimap(canvas: HTMLCanvasElement, hole: HoleData, ball: Vec2, shot
   const extras: Vec2[] = [ball];
   if (shot?.land) extras.push(shot.land);
   if (shot?.target) extras.push(shot.target);
+  if (shot?.missLandings) extras.push(...shot.missLandings);
   const pts = [...hole.path, hole.greenCenter, hole.tee, ...hole.bunkers.map((b) => b.center), ...extras];
   const xs = pts.map((p) => p[0]);
   const zs = pts.map((p) => p[1]);
@@ -407,6 +477,15 @@ function drawMinimap(canvas: HTMLCanvasElement, hole: HoleData, ball: Vec2, shot
     ctx.beginPath();
     ctx.arc(ax, ay, 3.2, 0, Math.PI * 2);
     ctx.fill();
+  }
+  if (shot?.missLandings?.length) {
+    ctx.fillStyle = shot.missDanger ? "rgba(232, 197, 106, 0.85)" : "rgba(154, 180, 204, 0.7)";
+    for (const m of shot.missLandings) {
+      const [mx, my] = map(m);
+      ctx.beginPath();
+      ctx.arc(mx, my, 2.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   if (shot?.land) {
     const [lx, ly] = map(shot.land);

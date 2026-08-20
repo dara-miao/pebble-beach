@@ -216,13 +216,14 @@ export const CLUB_LABEL: Record<Club, string> = {
   putter: "putt",
 };
 
-export function describeShot(req: ShotRequest, fromLie?: string): string {
+export function describeShot(req: ShotRequest, fromLie?: string, windCopy?: string): string {
   const wind =
-    req.windMph === 0
+    windCopy ??
+    (req.windMph === 0
       ? "still"
       : req.windMph < 0
         ? `${Math.abs(req.windMph)} mph downwind`
-        : `${req.windMph} mph ${req.windFromLeft ? "off the left" : "off the right"}`;
+        : `${req.windMph} mph ${req.windFromLeft ? "off the left" : "off the right"}`);
   const lie = fromLie ? ` · from ${fromLie}` : "";
   const aim =
     req.aimYardsLeft === 0

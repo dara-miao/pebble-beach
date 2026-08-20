@@ -163,6 +163,22 @@ body {
   font-weight: 600;
 }
 
+.holes button.posted small {
+  display: block;
+  font-size: 9px;
+  line-height: 1;
+  margin-top: -2px;
+  opacity: 0.85;
+}
+
+.holes button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+}
+
 .controls {
   display: flex;
   flex-direction: column;
@@ -275,6 +291,127 @@ body {
 .reset:hover {
   border-color: rgba(216, 181, 111, 0.45);
   color: #f3eee4;
+}
+
+.shot-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.wind-seg {
+  grid-template-columns: repeat(8, 1fr);
+}
+
+.wind-seg button {
+  font-size: 10px;
+  padding: 0;
+}
+
+.wind-mph {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.wind-mph b {
+  min-width: 58px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.wind-mph button {
+  height: 26px;
+  min-width: 26px;
+  padding: 0 7px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.28);
+  color: #c9c2b4;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.wind-mph button.on {
+  background: #d8b56f;
+  color: #1a140c;
+  border-color: #d8b56f;
+}
+
+.wind-on-shot {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #b9c0c8;
+  line-height: 1.35;
+}
+
+.scorecard {
+  padding: 10px 12px 12px;
+}
+
+.score-nine {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.score-nine + .score-nine {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.score-row {
+  display: grid;
+  grid-template-columns: 44px repeat(10, 1fr);
+  gap: 2px;
+  font-size: 10px;
+  text-align: center;
+  color: #c9c2b4;
+}
+
+.score-row em {
+  font-style: normal;
+  text-align: left;
+  color: #8e99a4;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.score-row.ids span,
+.score-row.par span:last-child,
+.score-row.strokes span:last-child {
+  color: #d8b56f;
+  font-weight: 600;
+}
+
+.score-row.strokes span.done {
+  color: #fff;
+}
+
+.round-line {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #c9c2b4;
+}
+
+.round-line b {
+  color: #fff;
+}
+
+.miss-line {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.miss-line.danger {
+  color: #f0d59a;
+}
+
+.miss-line.safe {
+  color: #9bb8a4;
 }
 
 .play-status {
