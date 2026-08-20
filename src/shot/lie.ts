@@ -74,7 +74,29 @@ export function lieEffect(lie: Lie, club: Club): LieEffect {
         maxCarry: 140,
         note: "Punch from the trees",
       };
-    case "rough":
+    case "rough": {
+      const flyer = club === "driver" || club === "3wood" || club === "5wood" || club === "hybrid" || club === "4iron" || club === "5iron";
+      const heavy = club === "8iron" || club === "9iron" || club === "pw" || club === "gw" || club === "sw" || club === "lw";
+      if (flyer) {
+        return {
+          lie,
+          carryScale: 1.06,
+          rollScale: 1.22,
+          peakScale: 0.9,
+          maxCarry: null,
+          note: "Flyer lie",
+        };
+      }
+      if (heavy) {
+        return {
+          lie,
+          carryScale: 0.8,
+          rollScale: 0.38,
+          peakScale: 0.88,
+          maxCarry: null,
+          note: "Heavy rough",
+        };
+      }
       return {
         lie,
         carryScale: 0.86,
@@ -83,6 +105,7 @@ export function lieEffect(lie: Lie, club: Club): LieEffect {
         maxCarry: null,
         note: "From the rough",
       };
+    }
     case "rock":
       return {
         lie,
@@ -105,8 +128,8 @@ export function lieEffect(lie: Lie, club: Club): LieEffect {
       return {
         lie,
         carryScale: club === "putter" ? 1 : 0.9,
-        rollScale: club === "putter" ? 1.35 : 0.45,
-        peakScale: club === "putter" ? 0.25 : 0.85,
+        rollScale: club === "putter" ? 1 : 0.45,
+        peakScale: club === "putter" ? 0.2 : 0.85,
         maxCarry: null,
         note: club === "putter" ? "Putt" : "From the green",
       };
@@ -123,10 +146,10 @@ export function lieEffect(lie: Lie, club: Club): LieEffect {
       return {
         lie,
         carryScale: 1,
-        rollScale: 1,
+        rollScale: lie === "fairway" ? 1.08 : 1,
         peakScale: 1,
         maxCarry: null,
-        note: lie === "tee" ? "From the tee" : "Fairway lie",
+        note: lie === "tee" ? "From the tee" : "Tight fairway",
       };
   }
 }

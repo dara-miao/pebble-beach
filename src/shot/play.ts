@@ -26,15 +26,43 @@ export interface HolePlay {
   lastShot: ShotResult | null;
 }
 
-const HOLE_OUT_YARDS = 1.05;
+/** About 2.2 feet — a tap-in a competitive golfer would concede as holed. */
+export const HOLE_OUT_YARDS = 0.72;
+export const CHIP_IN_YARDS = 0.45;
+
+export function pinDistance3d(x: number, z: number, hole: HoleData): number {
+  return Math.hypot(x - hole.pin[0], z - hole.pin[1]);
+}
+
+export function isHoledOut(pinYards: number, lie: Lie): boolean {
+  if (pinYards <= 0.12) return true;
+  return pinYards <= HOLE_OUT_YARDS && (lie === "green" || pinYards <= CHIP_IN_YARDS);
+}
+
+export function leftoverAmount(pinYards: number, lie: Lie, holed = false): number {
+  if (holed || pinYards <= 0) return 0;
+  if (lie === "green") return Math.max(1, Math.round(pinYards * 3));
+  return Math.round(pinYards);
+}
+
+export function leftoverUnit(lie: Lie, holed = false): "ft" | "yds" | "" {
+  if (holed) return "";
+  return lie === "green" ? "ft" : "yds";
+}
+
+export function formatLeftover(pinYards: number, lie: Lie, holed = false): string {
+  if (holed || pinYards <= 0) return "Holed";
+  const n = leftoverAmount(pinYards, lie, false);
+  return lie === "green" ? `${n} ft to pin` : `${n} yds to pin`;
+}
 
 export function ballAt(x: number, z: number, hole: HoleData, coverAt: (x: number, z: number) => Cover): BallState {
   const path = hole.path.length >= 2 ? hole.path : [hole.tee, hole.greenCenter];
   const cover = coverAt(x, z);
   const lie = classifyLie(cover);
-  const pinYards = Math.hypot(x - hole.pin[0], z - hole.pin[1]);
+  const pinYards = pinDistance3d(x, z, hole);
   const along = closestOnPath(path, [x, z]).along;
-  const holed = pinYards <= HOLE_OUT_YARDS && (lie === "green" || pinYards <= 0.55);
+  const holed = isHoledOut(pinYards, lie);
   return {
     x,
     z,
@@ -57,7 +85,7 @@ export function createHolePlay(hole: HoleData, tee: TeeSet, coverAt: (x: number,
     holeYards: scorecard,
     strokes: 0,
     penalties: 0,
-    ball: { ...ball, remainingYards: scorecard },
+    ball,
     pendingDrop: null,
     lastShot: null,
   };
@@ -104,9 +132,7 @@ export function applyShotResult(play: HolePlay, result: ShotResult, hole: HoleDa
 }
 
 export function leftoverCopy(play: HolePlay): string {
-  if (play.ball.holed) return "Holed";
-  if (play.ball.lie === "green") return `${Math.round(play.ball.pinYards)} yds to pin`;
-  return `${Math.round(play.ball.remainingYards)} yds to pin`;
+  return formatLeftover(play.ball.pinYards, play.ball.lie, play.ball.holed);
 }
 
 export function lieCopy(play: HolePlay): string {

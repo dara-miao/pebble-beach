@@ -3,7 +3,7 @@ import type { HoleData } from "../course/types";
 import type { Cover } from "../scene/cover";
 import { parseShotPrompt } from "./parse";
 import { applyLieToCarry } from "./lie";
-import { applyShotResult, ballAt, createHolePlay, resolveOrigin } from "./play";
+import { applyShotResult, ballAt, createHolePlay, pinDistance3d, resolveOrigin } from "./play";
 import { simulateShot } from "./simulate";
 
 function mockHole(over: Partial<HoleData> = {}): HoleData {
@@ -90,10 +90,50 @@ describe("sequential lie play", () => {
     const hole = mockHole();
     const start = createHolePlay(hole, "blue", coverAt);
     const { play, result } = playShot(start, hole, "7 iron 70");
-    expect(start.ball.remainingYards).toBe(100);
+    expect(start.ball.remainingYards).toBeCloseTo(pinDistance3d(hole.tee[0], hole.tee[1], hole), 5);
     expect(play.ball.remainingYards).toBeLessThan(start.ball.remainingYards - 40);
     expect(result.remainingYards).toBeGreaterThan(15);
     expect(result.carryYards).toBeGreaterThan(60);
+  });
+
+  it("keeps leftover yards equal to 3D distance to the pin", () => {
+    const hole = mockHole();
+    const start = createHolePlay(hole, "blue", coverAt);
+    expect(start.ball.remainingYards).toBeCloseTo(Math.hypot(hole.tee[0] - hole.pin[0], hole.tee[1] - hole.pin[1]), 5);
+    const { play, result } = playShot(start, hole, "7 iron 70");
+    const endDist = Math.hypot(play.ball.x - hole.pin[0], play.ball.z - hole.pin[1]);
+    expect(play.ball.remainingYards).toBeCloseTo(endDist, 5);
+    expect(result.remainingYards).toBeCloseTo(endDist, 5);
+    expect(result.end.pinYards).toBeCloseTo(endDist, 5);
+  });
+
+  it("uses the same flight, land, leftover, and trouble for preview and hit", () => {
+    const hole = mockHole();
+    const origin = ballAt(0, 0, hole, coverAt);
+    const req = parseShotPrompt("7 iron 70 fade");
+    const preview = simulateShot(hole, req, heightAt, coverAt, origin);
+    const hit = simulateShot(hole, req, heightAt, coverAt, origin);
+    expect(hit.end.x).toBeCloseTo(preview.end.x, 8);
+    expect(hit.end.z).toBeCloseTo(preview.end.z, 8);
+    expect(hit.landLie).toBe(preview.landLie);
+    expect(hit.remainingYards).toBeCloseTo(preview.remainingYards, 8);
+    expect(hit.carryYards).toBe(preview.carryYards);
+    expect(hit.rollYards).toBe(preview.rollYards);
+    expect(hit.trouble).toEqual(preview.trouble);
+    expect(hit.outcome).toBe(preview.outcome);
+  });
+
+  it("aims from the ball toward the pin, with optional left/right of that line", () => {
+    const hole = mockHole();
+    const origin = ballAt(0, 0, hole, coverAt);
+    const straight = simulateShot(hole, parseShotPrompt("7 iron 70"), heightAt, coverAt, origin);
+    const left = simulateShot(hole, parseShotPrompt("7 iron 70 12 left"), heightAt, coverAt, origin);
+    const right = simulateShot(hole, parseShotPrompt("7 iron 70 12 right"), heightAt, coverAt, origin);
+    expect(parseShotPrompt("7 iron 70 12 left").aimYardsLeft).toBe(12);
+    expect(parseShotPrompt("driver 250 at 220").landYards).toBe(220);
+    expect(left.end.x).toBeLessThan(straight.end.x - 4);
+    expect(right.end.x).toBeGreaterThan(straight.end.x + 4);
+    expect(straight.aim.leftYards).toBe(0);
   });
 
   it("plays a bunker lie shorter and steeper than the same club from fairway", () => {
@@ -172,5 +212,49 @@ describe("sequential lie play", () => {
     expect(rough.start.lie).toBe("rough");
     expect(rough.carryYards).toBeLessThan(fairway.carryYards);
     expect(rough.totalYards).toBeLessThan(fairway.totalYards);
+  });
+
+  it("treats flyer and heavy rough differently from a tight fairway", () => {
+    const hole = mockHole();
+    const fairway = ballAt(0, 40, hole, coverAt);
+    const rough = ballAt(12, 40, hole, coverAt);
+    const flyer = simulateShot(hole, parseShotPrompt("driver 250"), heightAt, coverAt, rough);
+    const fairDrive = simulateShot(hole, parseShotPrompt("driver 250"), heightAt, coverAt, fairway);
+    const heavy = simulateShot(hole, parseShotPrompt("pw 110"), heightAt, coverAt, rough);
+    const fairWedge = simulateShot(hole, parseShotPrompt("pw 110"), heightAt, coverAt, fairway);
+    expect(flyer.outcome.toLowerCase()).toMatch(/flyer/);
+    expect(flyer.carryYards).toBeGreaterThan(fairDrive.carryYards);
+    expect(heavy.outcome.toLowerCase()).toMatch(/heavy/);
+    expect(heavy.carryYards).toBeLessThan(fairWedge.carryYards * 0.9);
+    expect(applyLieToCarry("rough", "driver", 250).carry).toBeGreaterThan(250);
+    expect(applyLieToCarry("rough", "pw", 110).carry).toBeLessThan(95);
+  });
+
+  it("adds carry downhill and takes it away uphill", () => {
+    const hole = mockHole();
+    const origin = ballAt(0, 0, hole, coverAt);
+    const req = parseShotPrompt("7 iron 150");
+    const flat = simulateShot(hole, req, () => 10, coverAt, origin);
+    const downhill = simulateShot(hole, req, (_x, z) => 10 - z * 0.12, coverAt, origin);
+    const uphill = simulateShot(hole, req, (_x, z) => 10 + z * 0.12, coverAt, origin);
+    expect(downhill.carryYards).toBeGreaterThan(flat.carryYards);
+    expect(uphill.carryYards).toBeLessThan(flat.carryYards);
+    expect(downhill.elevNote.toLowerCase()).toMatch(/downhill/);
+    expect(uphill.elevNote.toLowerCase()).toMatch(/uphill/);
+  });
+
+  it("rolls a putt on the green and holes out when it reaches the pin", () => {
+    const hole = mockHole();
+    const from = ballAt(0, 92, hole, coverAt);
+    expect(from.lie).toBe("green");
+    expect(from.remainingYards).toBeCloseTo(8, 5);
+    const lag = simulateShot(hole, parseShotPrompt("putt 24 ft"), heightAt, coverAt, from);
+    expect(lag.landLie).toBe("green");
+    expect(lag.points.every((p) => !p.airborne || p.phase === "roll")).toBe(true);
+    const play = applyShotResult(createHolePlay(hole, "blue", coverAt), lag, hole, coverAt);
+    expect(play.ball.holed).toBe(true);
+    expect(play.ball.remainingYards).toBe(0);
+    expect(lag.leftoverLabel).toBe("Holed");
+    expect(lag.outcome.toLowerCase()).toMatch(/holed/);
   });
 });
