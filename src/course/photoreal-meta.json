@@ -1,0 +1,12 @@
+{
+  "minX": -280.0,
+  "maxX": 2140.0,
+  "minZ": -420.0,
+  "maxZ": 1580.0,
+  "minMeters": 1.1430022716522217,
+  "maxMeters": 165.5745849609375,
+  "aerial": "/textures/pebble-aerial.jpg",
+  "height": "/textures/pebble-height.png",
+  "attribution": "Imagery: Esri, Maxar, Earthstar Geographics. Elevation: USGS 3DEP. Layout: OpenStreetMap.",
+  "yard": 0.9144
+}
