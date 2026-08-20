@@ -2,11 +2,13 @@
 
 A browser golf simulator for **Pebble Beach Golf Links**. Walk the course in 3D, stand behind the ball, call a shot, and watch it play from that lie. Preview uses the same flight as Hit. The ball stays where it lands; leftover updates for the next shot.
 
-This is a **video-game reconstruction**, not a photoreal twin. Routing and yardages track the real course. Look and feel are stylized Three.js.
+Video-game look, real course layout. Routing and yardages track Pebble; the scene is built in Three.js.
 
 ## Quick start
 
 ```bash
+git clone https://github.com/dara-miao/golfcourse.git
+cd golfcourse
 npm install
 npm run dev
 ```
@@ -43,7 +45,7 @@ Club, yards, and shape are parsed from plain text:
 | `3 wood 230 off the left` | Crosswind from the left |
 | `putt 18 ft` | Putt |
 
-Lie matters: bunker, rough, and woods change carry and flight. Ocean is a penalty.
+Lie matters: bunker, rough, and woods change carry and flight.
 
 ### Cameras
 
@@ -66,52 +68,48 @@ Drag to orbit, right-drag to pan, scroll to zoom. Arrow keys change holes. `r` r
 
 Play all 18. Scores sync per hole. **New round** resets back to hole 1.
 
-## What is real vs stylized
+## Real vs stylized
 
-**Grounded in public data**
+**Real**
 
 - Hole paths, greens, tees, bunkers, fairways from **OpenStreetMap**
 - Published scorecard yardages (Champ ~7,040 · Blue ~6,802 · Gold ~6,472 · White ~6,083)
-- Ground height from **USGS NED 1/3″** (~10 m) via OpenTopoData
+- Ground height from **USGS NED** elevation data
 
-**Stylized / repaired**
+**Stylized**
 
-- Grass, ocean, trees, Lodge, lighting (Three.js game art)
-- Light accents so cliffs and cuts still read in-game
-- Thin OSM holes get a repaired green, tee box, or fairway corridor so the full card is playable
-- Tee boxes are oriented rectangles facing the fairway line of play
+- Grass, ocean, trees, Lodge, and lighting (Three.js)
+- Light terrain accents so cliffs and cuts read clearly
+- Repaired greens / tee boxes / fairway corridors where map data was thin
+- Tee boxes drawn as fairway-facing rectangles
 
-Not LiDAR, not a licensed yardage book, not photogrammetry.
+## Recommended highlight holes to try
+
+- **1** · Lodge opener: drive, then play the leftover
+- **7** · Short ocean par 3: try `8 iron 100`, then a short miss toward the water
+- **8** · Fairway aim, then the approach over the cut
+- **18** · Sea-wall finisher; default aim stays inland of the Pacific
 
 ## Project layout
 
 ```
 src/
   main.ts              App loop, input, camera, HUD wiring
-  course/              Course JSON, geometry helpers, OSM repair
+  course/              Course data, geometry, map repair
   scene/               Terrain, ocean/sky, features, trees
   camera/              Orbit + flyover / address modes
   shot/                Parse, simulate, lie, wind, miss, round, visuals
   ui/                  HUD
-scripts/
-  extract_osm.py       Build course JSON from OSM extracts
-  fetch_ned_elevation.py  Refresh USGS NED elevation grid
+scripts/               Optional tools to regenerate course data
 public/textures/       Water normals, etc.
 ```
 
-## Data scripts
+## Regenerating course data (optional)
 
-If you have fresh OSM XML tiles (same bbox workflow as in `extract_osm.py`):
+Most people never need this. The course JSON is already in the repo.
 
-```bash
-python3 scripts/extract_osm.py
-```
-
-Refresh elevation from NED (rate-limited public API; takes ~30s):
-
-```bash
-python3 scripts/fetch_ned_elevation.py
-```
+- `scripts/extract_osm.py` rebuilds layout from OpenStreetMap extracts
+- `scripts/fetch_ned_elevation.py` refreshes the elevation grid from USGS NED
 
 ## Stack
 
@@ -119,13 +117,6 @@ python3 scripts/fetch_ned_elevation.py
 - **Three.js** (WebGL scene, water, sky, controls)
 - **Vitest** for shot / hole tests
 
-## First holes to try
-
-- **1** — Lodge opener: drive, then play the leftover
-- **7** — Short ocean par 3: `8 iron 100` vs a short miss toward the water
-- **8** — Fairway aim, then the approach over the cut
-- **18** — Sea-wall finisher; default aim stays inland of the Pacific
-
 ## License / attribution
 
-Course geometry © OpenStreetMap contributors (ODbL). Elevation © USGS. Scorecard yardages from published public cards. This project is an unofficial fan reconstruction, not affiliated with Pebble Beach Company.
+Course geometry © OpenStreetMap contributors (ODbL). Elevation © USGS. Scorecard yardages from published public cards. Unofficial fan project, not affiliated with Pebble Beach Company.
