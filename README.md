@@ -106,8 +106,6 @@ public/textures/       Water normals, etc.
 
 ## Regenerating course data (optional)
 
-Most people never need this. The course JSON is already in the repo.
-
 - `scripts/extract_osm.py` rebuilds layout from OpenStreetMap extracts
 - `scripts/fetch_ned_elevation.py` refreshes the elevation grid from USGS NED
 
