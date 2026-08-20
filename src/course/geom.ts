@@ -113,3 +113,51 @@ export function holeByNumber(course: CourseData, n: number): HoleData {
   if (!hole) throw new Error(`Missing hole ${n}`);
   return hole;
 }
+
+/** First tee of the round — the Lodge opener, not the hole-7 test hole. */
+export const OPENING_HOLE = 1;
+
+/**
+ * Default landing on the hole's play line. Pin-line aim cuts doglegs
+ * (and the Pacific on 18); the path is the fairway the golfer should see.
+ */
+export function defaultFairwayTarget(
+  hole: HoleData,
+  origin: { x: number; z: number },
+  carryYards?: number,
+): { x: number; z: number } {
+  const path = hole.path.length >= 2 ? hole.path : [hole.tee, hole.greenCenter];
+  const pinYards = Math.hypot(origin.x - hole.pin[0], origin.z - hole.pin[1]);
+  if (pinYards < 40) return { x: hole.pin[0], z: hole.pin[1] };
+
+  const here = closestOnPath(path, [origin.x, origin.z]);
+  const len = pathLength(path);
+  const leftOnPath = Math.max(8, len - here.along);
+  if (leftOnPath < 35) return { x: hole.pin[0], z: hole.pin[1] };
+
+  const carry = carryYards ?? Math.min(250, Math.max(40, leftOnPath * 0.55));
+  const along = Math.min(len - 2, here.along + Math.min(carry, leftOnPath - 6));
+  const { point } = pointOnPath(path, Math.max(here.along + 18, along));
+  return { x: point[0], z: point[1] };
+}
+
+/** Closed stadium polygon along a polyline — used to fill missing fairway OSM. */
+export function corridorPolygon(path: Vec2[], halfWidth: number): Vec2[] {
+  if (path.length < 2) return [];
+  const left: Vec2[] = [];
+  const right: Vec2[] = [];
+  for (let i = 0; i < path.length; i++) {
+    const prev = path[Math.max(0, i - 1)];
+    const next = path[Math.min(path.length - 1, i + 1)];
+    const dx = next[0] - prev[0];
+    const dz = next[1] - prev[1];
+    const len = Math.hypot(dx, dz) || 1;
+    const nx = -dz / len;
+    const nz = dx / len;
+    left.push([path[i][0] + nx * halfWidth, path[i][1] + nz * halfWidth]);
+    right.push([path[i][0] - nx * halfWidth, path[i][1] - nz * halfWidth]);
+  }
+  const poly = [...left, ...right.reverse()];
+  poly.push(poly[0]);
+  return poly;
+}
