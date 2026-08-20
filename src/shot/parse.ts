@@ -147,12 +147,30 @@ export function parseShotPrompt(raw: string): ShotRequest {
   };
 }
 
-export function describeShot(req: ShotRequest): string {
+export function describeShot(req: ShotRequest, fromLie?: string): string {
   const wind =
     req.windMph === 0
       ? "still"
       : req.windMph < 0
         ? `${Math.abs(req.windMph)} mph downwind`
         : `${req.windMph} mph ${req.windFromLeft ? "off the left" : "off the right"}`;
-  return `${req.club} · ${req.carryYards} yds · ${req.shape} · ${wind}`;
+  const lie = fromLie ? ` · from ${fromLie}` : "";
+  return `${req.club} · ${req.carryYards} yds · ${req.shape} · ${wind}${lie}`;
 }
+
+export function clubForYards(yards: number): Club {
+  if (yards <= 22) return "putter";
+  let best: Club = "sw";
+  let bestErr = Infinity;
+  for (const club of Object.keys(CLUB_CARRY) as Club[]) {
+    if (club === "putter") continue;
+    const err = Math.abs(CLUB_CARRY[club] - yards);
+    if (err < bestErr) {
+      best = club;
+      bestErr = err;
+    }
+  }
+  return best;
+}
+
+export { CLUB_CARRY };

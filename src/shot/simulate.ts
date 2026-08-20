@@ -1,8 +1,10 @@
 import * as THREE from "three";
 import type { HoleData } from "../course/types";
-import { dist, pointOnPath } from "../course/geom";
-import type { ShotRequest, Shape } from "./parse";
+import { closestOnPath } from "../course/geom";
+import type { ShotRequest } from "./parse";
 import type { Cover } from "../scene/cover";
+import { applyLieToCarry, classifyLie, type Lie } from "./lie";
+import type { BallState } from "./play";
 
 export interface ShotPoint {
   position: THREE.Vector3;
@@ -16,12 +18,18 @@ export interface ShotResult {
   totalYards: number;
   peakYards: number;
   landCover: Cover;
+  landLie: Lie;
   outcome: string;
   pinDistance: number;
+  remainingYards: number;
+  start: { x: number; z: number; lie: Lie };
+  end: { x: number; z: number; cover: Cover; lie: Lie; alongYards: number; pinYards: number };
+  lastPlayable: { x: number; z: number };
+  lieNote: string;
+  penaltyStrokes: number;
 }
 
-function shapeLateral(shape: Shape, t: number, carry: number): number {
-  // Lateral yards (positive = right of aim).
+function shapeLateral(shape: ShotRequest["shape"], t: number, carry: number): number {
   const peak = (() => {
     switch (shape) {
       case "draw":
@@ -36,7 +44,6 @@ function shapeLateral(shape: Shape, t: number, carry: number): number {
         return 0;
     }
   })();
-  // Curve peaking late for fades/draws.
   return peak * Math.sin(t * Math.PI);
 }
 
@@ -45,87 +52,104 @@ export function simulateShot(
   req: ShotRequest,
   heightAt: (x: number, z: number) => number,
   coverAt: (x: number, z: number) => Cover,
-  teeSetYards: number,
+  origin: BallState,
+  dropped = false,
 ): ShotResult {
   const path = hole.path.length >= 2 ? hole.path : [hole.tee, hole.greenCenter];
-  const holeLen = Math.max(teeSetYards, dist(hole.tee, hole.greenCenter));
-  const startAlong = req.startYards != null ? Math.max(0, holeLen - req.startYards) : 0;
+  const pin: [number, number] = [hole.pin[0], hole.pin[1]];
+  const aimDx = pin[0] - origin.x;
+  const aimDz = pin[1] - origin.z;
+  const aimLen = Math.hypot(aimDx, aimDz) || 1;
+  const ux = aimDx / aimLen;
+  const uz = aimDz / aimLen;
+  const rx = uz;
+  const rz = -ux;
 
-  // Wind: negative = downwind (more carry); positive = into/cross (less carry + lateral).
-  const carryAdj =
-    req.windMph < 0 ? Math.abs(req.windMph) * 1.4 : req.windMph > 0 ? -req.windMph * 1.1 : 0;
-  const carry = Math.max(20, req.carryYards + carryAdj);
+  const windAdj = req.windMph < 0 ? Math.abs(req.windMph) * 1.4 : req.windMph > 0 ? -req.windMph * 1.1 : 0;
+  const requested = Math.max(8, req.carryYards + windAdj);
+  const { carry: lieCarry, effect } = applyLieToCarry(origin.lie, req.club, requested);
+  const carry = lieCarry;
   const cross = (req.windMph > 0 ? req.windMph : 0) * (req.windFromLeft ? 0.55 : -0.55);
 
   const launch = req.club === "driver" || req.club.includes("wood") ? 0.22 : req.club === "putter" ? 0.02 : 0.28;
-  const peakHeight = Math.max(2, carry * launch * (req.club === "lw" || req.club === "sw" ? 1.35 : 1));
+  const peakHeight = Math.max(1.2, carry * launch * (req.club === "lw" || req.club === "sw" ? 1.35 : 1)) * effect.peakScale;
 
   const samples = Math.max(40, Math.round(carry / 2.5));
   const points: ShotPoint[] = [];
-  let landCover: Cover = "fairway";
-  let landAlong = startAlong + carry;
+  let lastPlayable = { x: origin.x, z: origin.z };
   let peakYards = 0;
 
   for (let i = 0; i <= samples; i++) {
     const t = i / samples;
-    const along = startAlong + carry * t;
+    const along = carry * t;
     const lateral = shapeLateral(req.shape, t, carry) + cross * t * t;
-    const { point: onPath, dir: d } = pointOnPath(path, along);
-    const r: [number, number] = [d[1], -d[0]];
-    const x = onPath[0] + r[0] * lateral;
-    const z = onPath[1] + r[1] * lateral;
+    const x = origin.x + ux * along + rx * lateral;
+    const z = origin.z + uz * along + rz * lateral;
     const ground = heightAt(x, z);
     const flight = Math.sin(t * Math.PI) * peakHeight;
     const y = ground + flight;
     if (flight > peakYards) peakYards = flight;
+    if (coverAt(x, z) !== "ocean") lastPlayable = { x, z };
     points.push({
       position: new THREE.Vector3(x, y, z),
-      yardsAlong: along,
+      yardsAlong: origin.alongYards + along,
       airborne: flight > 0.35 && t < 0.98,
     });
   }
 
-  // Roll after landing: more on fairway/green, less in rough/bunker/ocean.
   const land = points[points.length - 1].position;
-  landCover = coverAt(land.x, land.z);
+  let landCover = coverAt(land.x, land.z);
   let roll = 0;
   if (landCover === "green") roll = carry * 0.04;
   else if (landCover === "fairway" || landCover === "tee") roll = carry * 0.08;
   else if (landCover === "rough") roll = carry * 0.03;
+  else if (landCover === "woods") roll = carry * 0.015;
   else if (landCover === "bunker" || landCover === "sand") roll = 1;
   else if (landCover === "ocean") roll = 0;
   else roll = carry * 0.04;
 
-  if (req.club === "putter") roll = Math.max(roll, carry * 0.15);
+  roll *= effect.rollScale;
+  if (req.club === "putter") roll = Math.max(roll, carry * 0.15 * effect.rollScale);
 
-  const rollSamples = Math.max(4, Math.round(roll / 3));
-  for (let i = 1; i <= rollSamples; i++) {
-    const t = i / rollSamples;
-    const along = startAlong + carry + roll * t;
-    landAlong = along;
-    const { point: onPath, dir: d } = pointOnPath(path, along);
-    const lastLat = shapeLateral(req.shape, 1, carry) + cross;
-    const r: [number, number] = [d[1], -d[0]];
-    // Decay lateral toward path a bit while rolling.
-    const lat = lastLat * (1 - t * 0.25);
-    const x = onPath[0] + r[0] * lat;
-    const z = onPath[1] + r[1] * lat;
-    const y = heightAt(x, z) + 0.15;
-    points.push({ position: new THREE.Vector3(x, y, z), yardsAlong: along, airborne: false });
+  const rollSamples = Math.max(4, Math.round(Math.max(roll, 0.01) / 3));
+  if (roll > 0.2) {
+    for (let i = 1; i <= rollSamples; i++) {
+      const t = i / rollSamples;
+      const along = carry + roll * t;
+      const lastLat = shapeLateral(req.shape, 1, carry) + cross;
+      const lat = lastLat * (1 - t * 0.25);
+      const x = origin.x + ux * along + rx * lat;
+      const z = origin.z + uz * along + rz * lat;
+      const y = heightAt(x, z) + 0.15;
+      if (coverAt(x, z) !== "ocean") lastPlayable = { x, z };
+      points.push({ position: new THREE.Vector3(x, y, z), yardsAlong: origin.alongYards + along, airborne: false });
+    }
   }
 
   const end = points[points.length - 1].position;
-  const pin = hole.pin;
-  const pinDistance = Math.hypot(end.x - pin[0], end.z - pin[1]);
   landCover = coverAt(end.x, end.z);
+  const landLie = classifyLie(landCover);
+  const pinDistance = Math.hypot(end.x - pin[0], end.z - pin[1]);
+  const alongEnd = closestOnPath(path, [end.x, end.z]).along;
+  const holed = pinDistance <= 1.05 && (landLie === "green" || pinDistance <= 0.55);
+  const remaining = holed ? 0 : pinDistance;
+  const leftover = Math.round(remaining);
+  const penaltyStrokes = landLie === "ocean" ? 1 : 0;
 
-  const remaining = Math.max(0, holeLen - landAlong);
-  let outcome = "";
-  if (landCover === "ocean") outcome = "In the Pacific. Penalty.";
-  else if (landCover === "bunker" || landCover === "sand") outcome = `In a bunker · ${Math.round(pinDistance)} yds to pin`;
-  else if (landCover === "green") outcome = `On the green · ${Math.round(pinDistance)} yds to pin`;
-  else if (remaining < 15) outcome = `Near the green · ${Math.round(pinDistance)} yds to pin`;
-  else outcome = `Landed in ${landCover} · ${Math.round(remaining)} yds to green`;
+  const landLine = (() => {
+    if (holed) return "Holed out";
+    if (landLie === "ocean") return "In the Pacific. Penalty drop next";
+    if (landLie === "bunker" || landLie === "sand") return `In a bunker · ${leftover} yds to pin`;
+    if (landLie === "green") return `On the green · ${leftover} yds to pin`;
+    if (landLie === "woods") return `In the trees · ${leftover} yds to pin`;
+    if (remaining < 15) return `Near the green · ${leftover} yds to pin`;
+    return `Landed in ${landLie} · ${leftover} yds to pin`;
+  })();
+
+  const bits: string[] = [];
+  if (dropped) bits.push("Penalty drop");
+  if (effect.note && origin.lie !== "fairway" && origin.lie !== "tee") bits.push(effect.note);
+  bits.push(landLine);
 
   return {
     points,
@@ -133,7 +157,14 @@ export function simulateShot(
     totalYards: Math.round(carry + roll),
     peakYards: Math.round(peakYards),
     landCover,
-    outcome,
+    landLie,
+    outcome: bits.join(" · "),
     pinDistance: Math.round(pinDistance),
+    remainingYards: remaining,
+    start: { x: origin.x, z: origin.z, lie: origin.lie },
+    end: { x: end.x, z: end.z, cover: landCover, lie: landLie, alongYards: alongEnd, pinYards: pinDistance },
+    lastPlayable,
+    lieNote: effect.note,
+    penaltyStrokes,
   };
 }

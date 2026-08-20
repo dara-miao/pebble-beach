@@ -5,7 +5,12 @@ import type { CameraMode, HoleData } from "../course/types";
 export interface CourseCamera {
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
-  setMode: (mode: CameraMode, hole: HoleData, heightAt: (x: number, z: number) => number) => void;
+  setMode: (
+    mode: CameraMode,
+    hole: HoleData,
+    heightAt: (x: number, z: number) => number,
+    fromBall?: [number, number],
+  ) => void;
   update: (dt: number) => void;
   followShot: (points: THREE.Vector3[], duration?: number) => void;
 }
@@ -106,14 +111,19 @@ export function createCourseCamera(canvas: HTMLCanvasElement): CourseCamera {
   let flight: Flight | null = null;
   let pathFlight: PathFlight | null = null;
 
-  const setMode = (mode: CameraMode, hole: HoleData, heightAt: (x: number, z: number) => number) => {
+  const setMode = (
+    mode: CameraMode,
+    hole: HoleData,
+    heightAt: (x: number, z: number) => number,
+    fromBall?: [number, number],
+  ) => {
     pathFlight = null;
-    const tee = hole.tee;
+    const stance = fromBall ?? hole.tee;
     const green = hole.greenCenter;
-    const teeY = heightAt(tee[0], tee[1]);
+    const stanceY = heightAt(stance[0], stance[1]);
     const greenY = heightAt(green[0], green[1]);
-    const dx = green[0] - tee[0];
-    const dz = green[1] - tee[1];
+    const dx = green[0] - stance[0];
+    const dz = green[1] - stance[1];
     const len = Math.hypot(dx, dz) || 1;
     const ux = dx / len;
     const uz = dz / len;
@@ -121,7 +131,7 @@ export function createCourseCamera(canvas: HTMLCanvasElement): CourseCamera {
     const lz = ux;
 
     if (mode === "flyover") {
-      const path = hole.path.length >= 2 ? hole.path : [tee, green];
+      const path = hole.path.length >= 2 ? hole.path : [hole.tee, green];
       const positions: THREE.Vector3[] = [];
       const targets: THREE.Vector3[] = [];
       const steps = Math.max(10, Math.round(len / 28));
@@ -163,7 +173,7 @@ export function createCourseCamera(canvas: HTMLCanvasElement): CourseCamera {
     const toTarget = new THREE.Vector3();
 
     if (mode === "tee") {
-      toPos.set(tee[0] - ux * 32, teeY + 11, tee[1] - uz * 32);
+      toPos.set(stance[0] - ux * 32, stanceY + 11, stance[1] - uz * 32);
       toTarget.set(green[0], greenY + 3, green[1]);
     } else if (mode === "green") {
       toPos.set(green[0] + lx * 34 - ux * 10, greenY + 16, green[1] + lz * 34 - uz * 10);

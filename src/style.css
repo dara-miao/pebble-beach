@@ -230,15 +230,85 @@ body {
   color: #1a140c;
 }
 
+.shot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .shot-head h2,
 .book-head h2 {
   font-size: 10px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: #d8b56f;
-  margin-bottom: 10px;
   font-weight: 500;
 }
+
+.book-head h2 {
+  margin-bottom: 10px;
+}
+
+.reset {
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.28);
+  color: #c9c2b4;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.reset:hover {
+  border-color: rgba(216, 181, 111, 0.45);
+  color: #f3eee4;
+}
+
+.play-status {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 0.8fr;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.play-stat em {
+  display: block;
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8e99a4;
+  margin-bottom: 3px;
+}
+
+.play-stat b {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.lie-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.lie-tee { background: #d8b56f; color: #1a140c; }
+.lie-fairway { background: #3d7a3a; color: #f3eee4; }
+.lie-rough { background: #4a5c32; color: #f3eee4; }
+.lie-woods { background: #1f4a2e; color: #e4f0e4; }
+.lie-bunker, .lie-sand { background: #c9a56b; color: #1a140c; }
+.lie-green { background: #4aa34a; color: #0f1a0e; }
+.lie-ocean { background: #2a6f8f; color: #e8f4fa; }
+.lie-rock { background: #6e675c; color: #f3eee4; }
+.lie-path { background: #8a7b68; color: #f3eee4; }
 
 .shot-form {
   display: flex;
@@ -332,6 +402,18 @@ body {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
+}
+
+.nums.four {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.result.preview .outcome {
+  color: #d7e8f8;
+}
+
+.result.preview .summary {
+  color: #9ad4ff;
 }
 
 .nums b {
