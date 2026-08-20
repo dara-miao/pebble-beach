@@ -14,6 +14,35 @@ export function pathLength(path: Vec2[]): number {
   return n;
 }
 
+export function closestOnPath(path: Vec2[], p: Vec2): { point: Vec2; along: number; dist: number } {
+  if (path.length < 2) {
+    const point = path[0] ?? p;
+    return { point, along: 0, dist: dist(point, p) };
+  }
+  let bestAlong = 0;
+  let bestPoint: Vec2 = path[0];
+  let bestD = Infinity;
+  let walked = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i];
+    const b = path[i + 1];
+    const seg = dist(a, b) || 1e-6;
+    const dx = (b[0] - a[0]) / seg;
+    const dz = (b[1] - a[1]) / seg;
+    const proj = Math.max(0, Math.min(seg, (p[0] - a[0]) * dx + (p[1] - a[1]) * dz));
+    const qx = a[0] + dx * proj;
+    const qz = a[1] + dz * proj;
+    const d = Math.hypot(p[0] - qx, p[1] - qz);
+    if (d < bestD) {
+      bestD = d;
+      bestAlong = walked + proj;
+      bestPoint = [qx, qz];
+    }
+    walked += seg;
+  }
+  return { point: bestPoint, along: bestAlong, dist: bestD };
+}
+
 export function pointOnPath(path: Vec2[], yards: number): { point: Vec2; dir: Vec2 } {
   if (path.length < 2) return { point: path[0] ?? [0, 0], dir: [0, 1] };
   let remaining = Math.max(0, yards);

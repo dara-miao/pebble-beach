@@ -1,7 +1,7 @@
 import type { CourseData, HoleData, Vec2 } from "../course/types";
 import { greenPolygon, pointInPoly, polyBBox } from "../course/geom";
 
-export type Cover = "ocean" | "sand" | "rock" | "rough" | "fairway" | "green" | "tee" | "bunker" | "path";
+export type Cover = "ocean" | "sand" | "rock" | "rough" | "woods" | "fairway" | "green" | "tee" | "bunker" | "path";
 
 interface IndexedPoly {
   type: Cover;
@@ -17,6 +17,7 @@ const COLORS: Record<Cover, [number, number, number]> = {
   sand: [0.82, 0.72, 0.52],
   rock: [0.48, 0.44, 0.4],
   rough: [0.2, 0.38, 0.18],
+  woods: [0.14, 0.3, 0.16],
   fairway: [0.28, 0.58, 0.26],
   green: [0.36, 0.72, 0.34],
   tee: [0.32, 0.62, 0.3],
@@ -33,7 +34,7 @@ function add(index: IndexedPoly[], type: Cover, poly: Vec2[]) {
 export function buildCoverIndex(course: CourseData): IndexedPoly[] {
   const index: IndexedPoly[] = [];
   for (const r of course.rough) add(index, "rough", r.polygon);
-  for (const w of course.woods) add(index, "rough", w);
+  for (const w of course.woods) add(index, "woods", w);
   for (const hole of course.holes) {
     for (const f of hole.fairways) add(index, "fairway", f.polygon);
     for (const t of hole.tees) add(index, "tee", t.polygon);
@@ -55,8 +56,9 @@ export function coverAt(x: number, z: number, index: IndexedPoly[]): Cover | nul
     rough: 5,
     fairway: 6,
     tee: 7,
-    bunker: 8,
-    green: 9,
+    woods: 8,
+    bunker: 9,
+    green: 10,
   };
   for (const f of index) {
     if (x < f.minX || x > f.maxX || z < f.minZ || z > f.maxZ) continue;
