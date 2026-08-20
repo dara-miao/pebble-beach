@@ -62,4 +62,4 @@ export interface CourseData {
 }
 
 export type TeeSet = "championship" | "blue" | "gold" | "white";
-export type CameraMode = "tee" | "flyover" | "green" | "overview";
+export type CameraMode = "address" | "tee" | "flyover" | "green" | "overview";

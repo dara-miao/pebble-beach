@@ -2,6 +2,8 @@ import type { HoleData, TeeSet } from "../course/types";
 import { closestOnPath } from "../course/geom";
 import type { Cover } from "../scene/cover";
 import { classifyLie, lieLabel, type Lie } from "./lie";
+import type { Club } from "./parse";
+import { CLUB_LABEL } from "./parse";
 import type { ShotResult } from "./simulate";
 
 export interface BallState {
@@ -15,6 +17,19 @@ export interface BallState {
   holed: boolean;
 }
 
+export interface HoleShot {
+  club: Club;
+  clubLabel: string;
+  carryYards: number;
+  totalYards: number;
+  lieIn: Lie;
+  lieOut: Lie;
+  leftoverLabel: string;
+  leftover: number;
+  leftoverUnit: "ft" | "yds" | "";
+  penalty: number;
+}
+
 export interface HolePlay {
   holeNumber: number;
   tee: TeeSet;
@@ -24,6 +39,7 @@ export interface HolePlay {
   ball: BallState;
   pendingDrop: { x: number; z: number } | null;
   lastShot: ShotResult | null;
+  shots: HoleShot[];
 }
 
 /** About 2.2 feet — a tap-in a competitive golfer would concede as holed. */
@@ -88,6 +104,7 @@ export function createHolePlay(hole: HoleData, tee: TeeSet, coverAt: (x: number,
     ball,
     pendingDrop: null,
     lastShot: null,
+    shots: [],
   };
 }
 
@@ -121,6 +138,19 @@ export function resolveOrigin(play: HolePlay, hole: HoleData, coverAt: (x: numbe
 export function applyShotResult(play: HolePlay, result: ShotResult, hole: HoleData, coverAt: (x: number, z: number) => Cover): HolePlay {
   const ball = ballAt(result.end.x, result.end.z, hole, coverAt);
   const penalty = result.penaltyStrokes;
+  const leftover = leftoverAmount(ball.pinYards, ball.lie, ball.holed);
+  const shot: HoleShot = {
+    club: result.club,
+    clubLabel: CLUB_LABEL[result.club],
+    carryYards: result.carryYards,
+    totalYards: result.totalYards,
+    lieIn: result.start.lie,
+    lieOut: result.landLie,
+    leftoverLabel: result.leftoverLabel,
+    leftover,
+    leftoverUnit: leftoverUnit(ball.lie, ball.holed),
+    penalty,
+  };
   return {
     ...play,
     strokes: play.strokes + 1 + penalty,
@@ -128,6 +158,7 @@ export function applyShotResult(play: HolePlay, result: ShotResult, hole: HoleDa
     ball,
     pendingDrop: ball.lie === "ocean" ? playableDrop(result.lastPlayable, hole, coverAt) : null,
     lastShot: result,
+    shots: [...play.shots, shot],
   };
 }
 
@@ -140,4 +171,9 @@ export function lieCopy(play: HolePlay): string {
     return `${lieLabel(play.ball.lie)} · drop next`;
   }
   return lieLabel(play.ball.lie);
+}
+
+export function scoreCopy(play: HolePlay): string {
+  if (play.strokes === 0) return "—";
+  return play.penalties ? `${play.strokes} (${play.penalties} pen)` : `${play.strokes}`;
 }

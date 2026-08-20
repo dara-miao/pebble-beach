@@ -5,7 +5,8 @@ import { holeByNumber } from "../course/geom";
 import { buildCoverIndex, heightAt as sampleHeight } from "../scene/cover";
 import { parseShotPrompt } from "./parse";
 import { applyShotResult, ballAt, createHolePlay, pinDistance3d, resolveOrigin } from "./play";
-import { simulateShot } from "./simulate";
+import { aimFromPoint, simulateShot } from "./simulate";
+import { bookFromHere, clearStatus, suggestShot } from "./yardage";
 
 const course = courseJson as unknown as CourseData;
 const index = buildCoverIndex(course);
@@ -93,6 +94,53 @@ describe("Pebble Beach hole play", () => {
     const wet = applyShotResult(tee, oceanHit, hole, coverAt);
     expect(wet.ball.lie).toBe("ocean");
     expect(resolveOrigin(wet, hole, coverAt).dropped).toBe(true);
+  });
+
+  it("reads leftover and hazard-clear from a hole 8 mid-fairway lie", () => {
+    const hole = holeByNumber(course, 8);
+    let play = createHolePlay(hole, "blue", coverAt);
+    const drive = simulateShot(hole, parseShotPrompt("driver 250"), heightAt, coverAt, play.ball);
+    play = applyShotResult(play, drive, hole, coverAt);
+    const left = pinDistance3d(play.ball.x, play.ball.z, hole);
+    expect(play.ball.remainingYards).toBeCloseTo(left, 5);
+    expect(play.ball.remainingYards).toBeGreaterThan(120);
+
+    const toPinX = hole.pin[0] - play.ball.x;
+    const toPinZ = hole.pin[1] - play.ball.z;
+    const len = Math.hypot(toPinX, toPinZ) || 1;
+    const book = bookFromHere(play.ball, hole, { ux: toPinX / len, uz: toPinZ / len }, coverAt);
+    expect(book.leftoverYards).toBe(Math.round(left));
+    expect(book.hazards.length).toBeGreaterThan(0);
+    const first = book.firstTrouble;
+    expect(first).toBeTruthy();
+    expect(first!.carryYards).toBeGreaterThan(8);
+    expect(first!.carryYards).toBeLessThan(play.ball.remainingYards + 20);
+    expect(clearStatus(Math.max(8, first!.carryYards - 20), first!)).toBe("short");
+    expect(clearStatus(first!.exitYards + 6, first!)).toBe("covers");
+    expect(suggestShot(play.ball.lie, play.ball.remainingYards, play.ball.pinYards).carryYards).toBeGreaterThan(100);
+  });
+
+  it("matches target-aim preview to Hit on hole 7", () => {
+    const hole = holeByNumber(course, 7);
+    const origin = ballAt(hole.tee[0], hole.tee[1], hole, coverAt);
+    const toPinX = hole.pin[0] - origin.x;
+    const toPinZ = hole.pin[1] - origin.z;
+    const pinLen = Math.hypot(toPinX, toPinZ) || 1;
+    const pux = toPinX / pinLen;
+    const puz = toPinZ / pinLen;
+    const prx = -puz;
+    const prz = pux;
+    const target = { x: origin.x + pux * 80 + prx * 10, z: origin.z + puz * 80 + prz * 10 };
+    const aimed = aimFromPoint(origin, hole.pin, target);
+    const req = { ...parseShotPrompt("pw 80"), target, landYards: aimed.landYards, aimYardsLeft: aimed.aimYardsLeft };
+    const preview = simulateShot(hole, req, heightAt, coverAt, origin);
+    const hit = simulateShot(hole, req, heightAt, coverAt, origin);
+    expect(hit.end.x).toBeCloseTo(preview.end.x, 8);
+    expect(hit.end.z).toBeCloseTo(preview.end.z, 8);
+    expect(hit.remainingYards).toBeCloseTo(preview.remainingYards, 8);
+    expect(hit.carryYards).toBe(preview.carryYards);
+    expect(hit.trouble).toEqual(preview.trouble);
+    expect(Math.abs(aimed.aimYardsLeft)).toBeGreaterThan(6);
   });
 
   it("plays hole 7 into sand, hole 8 leftover after a driver, then putts out", () => {
