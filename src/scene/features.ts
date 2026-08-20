@@ -1,25 +1,99 @@
 import * as THREE from "three";
 import type { CourseData, HoleData, Vec2 } from "../course/types";
-import { dist, fairwayDirection, greenPolygon, pointOnPath } from "../course/geom";
+import { dist, fairwayDirection, greenPolygon, pointInPoly, pointOnPath, polyBBox } from "../course/geom";
 
-function shapeFromPoly(poly: Vec2[]): THREE.Shape {
-  const s = new THREE.Shape();
-  s.moveTo(poly[0][0], poly[0][1]);
-  for (let i = 1; i < poly.length; i++) s.lineTo(poly[i][0], poly[i][1]);
-  return s;
+/** Overlay height that never drops into the ocean — that yank is what spiked 17. */
+function landHeight(heightAt: (x: number, z: number) => number, x: number, z: number, fallback: number): number {
+  const y = heightAt(x, z);
+  return Number.isFinite(y) && y >= 0.4 ? y : fallback;
 }
 
-function drapeGeometry(geo: THREE.BufferGeometry, heightAt: (x: number, z: number) => number, lift: number) {
-  // ShapeGeometry is in XY. Map shape Y → world Z directly (do not rotateX:
-  // that would negate Z and leave greens/bunkers mirrored over the bay).
-  const pos = geo.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const z = pos.getY(i);
-    pos.setXYZ(i, x, heightAt(x, z) + lift, z);
+function polyFallbackHeight(poly: Vec2[], heightAt: (x: number, z: number) => number): number {
+  const ys: number[] = [];
+  for (const [x, z] of poly) {
+    const y = heightAt(x, z);
+    if (Number.isFinite(y) && y >= 0.4) ys.push(y);
   }
-  pos.needsUpdate = true;
+  if (!ys.length) return 2;
+  ys.sort((a, b) => a - b);
+  return ys[Math.floor(ys.length / 2)];
+}
+
+/**
+ * Drape a filled polygon onto the terrain with short edges.
+ * Earcut on a coastal horseshoe (hole 17 bunkers) spans the green and
+ * stretches triangles from inland height down to the ocean.
+ */
+function drapedPolyGeometry(
+  poly: Vec2[],
+  heightAt: (x: number, z: number) => number,
+  lift: number,
+  step = 3.2,
+): THREE.BufferGeometry | null {
+  if (poly.length < 3) return null;
+  const fallback = polyFallbackHeight(poly, heightAt);
+  const box = polyBBox(poly);
+  const width = box.maxX - box.minX;
+  const depth = box.maxZ - box.minZ;
+  if (width < 0.8 || depth < 0.8) return null;
+
+  const cols = Math.max(2, Math.ceil(width / step) + 1);
+  const rows = Math.max(2, Math.ceil(depth / step) + 1);
+  const xs = Array.from({ length: cols }, (_, i) => box.minX + (width * i) / (cols - 1));
+  const zs = Array.from({ length: rows }, (_, i) => box.minZ + (depth * i) / (rows - 1));
+
+  const idxOf = (c: number, r: number) => r * cols + c;
+  const inside: boolean[] = new Array(cols * rows);
+  const positions = new Float32Array(cols * rows * 3);
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = xs[c];
+      const z = zs[r];
+      const on = pointInPoly(x, z, poly);
+      inside[idxOf(c, r)] = on;
+      const i = idxOf(c, r) * 3;
+      positions[i] = x;
+      positions[i + 1] = landHeight(heightAt, x, z, fallback) + lift;
+      positions[i + 2] = z;
+    }
+  }
+
+  const indices: number[] = [];
+  for (let r = 0; r < rows - 1; r++) {
+    for (let c = 0; c < cols - 1; c++) {
+      const a = idxOf(c, r);
+      const b = idxOf(c + 1, r);
+      const d = idxOf(c, r + 1);
+      const e = idxOf(c + 1, r + 1);
+      const count = (inside[a] ? 1 : 0) + (inside[b] ? 1 : 0) + (inside[d] ? 1 : 0) + (inside[e] ? 1 : 0);
+      if (count < 3) continue;
+      if (inside[a] && inside[b] && inside[e]) indices.push(a, b, e);
+      if (inside[a] && inside[e] && inside[d]) indices.push(a, e, d);
+      if (count === 3 && !(inside[a] && inside[b] && inside[e]) && !(inside[a] && inside[e] && inside[d])) {
+        const cell = [a, b, e, d].filter((i) => inside[i]);
+        if (cell.length === 3) indices.push(cell[0], cell[1], cell[2]);
+      }
+    }
+  }
+  if (indices.length < 3) return null;
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geo.setIndex(indices);
   geo.computeVertexNormals();
+  return geo;
+}
+
+function overlayMat(color: number, roughness: number): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness,
+    metalness: 0,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+  });
 }
 
 export function addCourseFeatures(
@@ -27,21 +101,9 @@ export function addCourseFeatures(
   course: CourseData,
   heightAt: (x: number, z: number) => number,
 ): void {
-  const bunkerMat = new THREE.MeshStandardMaterial({
-    color: 0xd4b37a,
-    roughness: 1,
-    metalness: 0,
-  });
-  const greenMat = new THREE.MeshStandardMaterial({
-    color: 0x4aa34a,
-    roughness: 0.72,
-    metalness: 0,
-  });
-  const teeMat = new THREE.MeshStandardMaterial({
-    color: 0x4a9a48,
-    roughness: 0.78,
-    metalness: 0,
-  });
+  const bunkerMat = overlayMat(0xd4b37a, 1);
+  const greenMat = overlayMat(0x4aa34a, 0.72);
+  const teeMat = overlayMat(0x4a9a48, 0.78);
   const teeEdgeMat = new THREE.MeshStandardMaterial({
     color: 0x2f6d32,
     roughness: 0.9,
@@ -64,8 +126,8 @@ export function addCourseFeatures(
 
   for (const b of bunkers) {
     if (b.polygon.length < 4) continue;
-    const geo = new THREE.ShapeGeometry(shapeFromPoly(b.polygon), 4);
-    drapeGeometry(geo, heightAt, 0.08);
+    const geo = drapedPolyGeometry(b.polygon, heightAt, 0.08, 2.8);
+    if (!geo) continue;
     const mesh = new THREE.Mesh(geo, bunkerMat);
     mesh.receiveShadow = true;
     scene.add(mesh);
@@ -73,11 +135,12 @@ export function addCourseFeatures(
 
   for (const hole of course.holes) {
     const gpoly = greenPolygon(hole);
-    const geo = new THREE.ShapeGeometry(shapeFromPoly(gpoly), 6);
-    drapeGeometry(geo, heightAt, 0.12);
-    const mesh = new THREE.Mesh(geo, greenMat);
-    mesh.receiveShadow = true;
-    scene.add(mesh);
+    const geo = drapedPolyGeometry(gpoly, heightAt, 0.12, 2.6);
+    if (geo) {
+      const mesh = new THREE.Mesh(geo, greenMat);
+      mesh.receiveShadow = true;
+      scene.add(mesh);
+    }
     scene.add(makeFlag(hole, heightAt));
     hole.tees.forEach((t, i) => {
       if (t.polygon.length < 4) return;
@@ -87,7 +150,8 @@ export function addCourseFeatures(
 
   for (const path of course.cartpaths) {
     if (path.length < 2) continue;
-    scene.add(makeRibbon(path, 1.6, pathMat, heightAt, 0.06));
+    const ribbon = makeRibbon(path, 1.6, pathMat, heightAt, 0.06);
+    if (ribbon) scene.add(ribbon);
   }
 
   scene.add(makeLodge(course, heightAt));
@@ -107,12 +171,12 @@ function makeTeeBox(
   const yaw = Math.atan2(forward[0], forward[1]);
   const y = heightAt(center[0], center[1]);
 
-  // Surface draped to the oriented polygon (already fairway-facing from repair).
-  const topGeo = new THREE.ShapeGeometry(shapeFromPoly(polygon), 2);
-  drapeGeometry(topGeo, heightAt, 0.18);
-  const top = new THREE.Mesh(topGeo, surface);
-  top.receiveShadow = true;
-  group.add(top);
+  const topGeo = drapedPolyGeometry(polygon, heightAt, 0.18, 2.2);
+  if (topGeo) {
+    const top = new THREE.Mesh(topGeo, surface);
+    top.receiveShadow = true;
+    group.add(top);
+  }
 
   // Raised pad so it reads as a real tee box, not a flat patch.
   const pad = new THREE.Mesh(new THREE.BoxGeometry(13, 0.35, 8), edge);
@@ -140,16 +204,27 @@ function makeTeeBox(
   return group;
 }
 
+function cleanCurvePoints(pts: THREE.Vector3[]): THREE.Vector3[] {
+  const out: THREE.Vector3[] = [];
+  for (const p of pts) {
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
+    if (out.length && out[out.length - 1].distanceTo(p) < 0.4) continue;
+    out.push(p);
+  }
+  return out;
+}
+
 function makeRibbon(
   path: Vec2[],
   width: number,
   mat: THREE.Material,
   heightAt: (x: number, z: number) => number,
   lift: number,
-): THREE.Mesh {
-  const pts = path.map(([x, z]) => new THREE.Vector3(x, heightAt(x, z) + lift, z));
+): THREE.Mesh | null {
+  const pts = cleanCurvePoints(path.map(([x, z]) => new THREE.Vector3(x, heightAt(x, z) + lift, z)));
+  if (pts.length < 2) return null;
   const curve = new THREE.CatmullRomCurve3(pts);
-  const geo = new THREE.TubeGeometry(curve, Math.max(8, path.length * 2), width * 0.5, 5, false);
+  const geo = new THREE.TubeGeometry(curve, Math.max(8, pts.length * 2), width * 0.5, 5, false);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
   return mesh;

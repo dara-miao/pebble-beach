@@ -125,11 +125,22 @@ export function upsertLieMarker(scene: THREE.Scene, x: number, y: number, z: num
   }
 }
 
+function cleanCurvePoints(pts: THREE.Vector3[]): THREE.Vector3[] {
+  const out: THREE.Vector3[] = [];
+  for (const p of pts) {
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
+    if (out.length && out[out.length - 1].distanceTo(p) < 0.35) continue;
+    out.push(p);
+  }
+  return out;
+}
+
 function addTube(group: THREE.Group, pts: THREE.Vector3[], radius: number, color: number, opacity: number) {
-  if (pts.length < 2) return;
-  const curve = new THREE.CatmullRomCurve3(pts);
+  const clean = cleanCurvePoints(pts);
+  if (clean.length < 2) return;
+  const curve = new THREE.CatmullRomCurve3(clean);
   const tube = new THREE.Mesh(
-    new THREE.TubeGeometry(curve, Math.max(24, pts.length * 2), radius, 5, false),
+    new THREE.TubeGeometry(curve, Math.max(24, clean.length * 2), radius, 5, false),
     new THREE.MeshBasicMaterial({ color, transparent: true, opacity }),
   );
   group.add(tube);
@@ -169,8 +180,6 @@ function addMissEnvelope(group: THREE.Group, envelope: MissEnvelope, heightAt: (
   for (const sample of envelope.samples) {
     const tint = missTint(sample);
     const danger = sample.trouble.ocean || sample.trouble.bunker || sample.trouble.woods;
-    const pts = sample.result.points.filter((p) => p.phase === "carry").map((p) => p.position.clone());
-    if (pts.length >= 2) addTube(group, pts, danger ? 0.2 : 0.14, tint, danger ? 0.28 : 0.12);
     const land = new THREE.Vector3(sample.x, heightAt(sample.x, sample.z) + 0.2, sample.z);
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(danger ? 1.05 : 0.7, danger ? 1.85 : 1.2, 16),
@@ -248,7 +257,10 @@ export function playShotVisual(scene: THREE.Scene, result: ShotResult, duration 
   const group = new THREE.Group();
   group.name = "shot-visual";
 
-  const trailPts = result.points.map((p) => p.position.clone());
+  const trailPts = cleanCurvePoints(result.points.map((p) => p.position.clone()));
+  if (trailPts.length < 2) {
+    return { group, update: () => true, trailPoints: trailPts };
+  }
   const curve = new THREE.CatmullRomCurve3(trailPts);
   const tint = previewTint(result);
   const tube = new THREE.Mesh(
