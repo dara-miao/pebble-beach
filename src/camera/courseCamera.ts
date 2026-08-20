@@ -183,8 +183,10 @@ export function createCourseCamera(canvas: HTMLCanvasElement): CourseCamera {
       toPos.set(stance[0] - ux * back, stanceY + height, stance[1] - uz * back);
       toTarget.set(stance[0] + ux * look, focusY + 1.2, stance[1] + uz * look);
     } else if (mode === "tee") {
-      toPos.set(stance[0] - ux * 32, stanceY + 11, stance[1] - uz * 32);
-      toTarget.set(green[0], greenY + 3, green[1]);
+      // Look down the fairway line of play, not a shortcut at the green.
+      const look = Math.min(Math.max(70, len * 0.45), Math.max(len, 90));
+      toPos.set(stance[0] - ux * 28, stanceY + 10, stance[1] - uz * 28);
+      toTarget.set(stance[0] + ux * look, focusY + 2, stance[1] + uz * look);
     } else if (mode === "green") {
       toPos.set(green[0] + lx * 34 - ux * 10, greenY + 16, green[1] + lz * 34 - uz * 10);
       toTarget.set(green[0], greenY + 1, green[1]);

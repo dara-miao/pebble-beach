@@ -141,6 +141,42 @@ export function defaultFairwayTarget(
   return { x: point[0], z: point[1] };
 }
 
+/**
+ * Line of play from a stance: down the fairway path, not a shortcut to the pin.
+ * Used for tee-box orientation and the address/tee camera.
+ */
+export function fairwayDirection(
+  hole: HoleData,
+  origin: { x: number; z: number } = { x: hole.tee[0], z: hole.tee[1] },
+): Vec2 {
+  const target = defaultFairwayTarget(hole, origin, 180);
+  const dx = target.x - origin.x;
+  const dz = target.z - origin.z;
+  const len = Math.hypot(dx, dz);
+  if (len < 1e-3) {
+    const path = hole.path.length >= 2 ? hole.path : [hole.tee, hole.greenCenter];
+    const { dir } = pointOnPath(path, Math.min(60, pathLength(path) * 0.2));
+    return dir;
+  }
+  return [dx / len, dz / len];
+}
+
+/** Rectangle in XZ: depth along forward, width across. Closed polygon. */
+export function orientedRect(center: Vec2, forward: Vec2, halfWidth: number, halfDepth: number): Vec2[] {
+  const fx = forward[0];
+  const fz = forward[1];
+  const rx = -fz;
+  const rz = fx;
+  const corners: Vec2[] = [
+    [center[0] - fx * halfDepth - rx * halfWidth, center[1] - fz * halfDepth - rz * halfWidth],
+    [center[0] - fx * halfDepth + rx * halfWidth, center[1] - fz * halfDepth + rz * halfWidth],
+    [center[0] + fx * halfDepth + rx * halfWidth, center[1] + fz * halfDepth + rz * halfWidth],
+    [center[0] + fx * halfDepth - rx * halfWidth, center[1] + fz * halfDepth - rz * halfWidth],
+  ];
+  corners.push(corners[0]);
+  return corners;
+}
+
 /** Closed stadium polygon along a polyline — used to fill missing fairway OSM. */
 export function corridorPolygon(path: Vec2[], halfWidth: number): Vec2[] {
   if (path.length < 2) return [];

@@ -3,8 +3,9 @@ import {
   closestOnPath,
   corridorPolygon,
   dist,
-  ellipseAround,
+  fairwayDirection,
   greenPolygon,
+  orientedRect,
   pathLength,
   pointInPoly,
 } from "./geom";
@@ -67,12 +68,24 @@ function ensureGreen(hole: HoleData): void {
 }
 
 function ensureTeeBox(hole: HoleData): void {
+  const forward = fairwayDirection(hole);
   const onBox = hole.tees.some((t) => t.polygon.length >= 3 && pointInPoly(hole.tee[0], hole.tee[1], t.polygon));
-  if (onBox) return;
-  hole.tees.push({
-    polygon: ellipseAround(hole.tee, 9, 7),
-    center: hole.tee,
-  });
+  if (!onBox) {
+    hole.tees.push({
+      polygon: orientedRect(hole.tee, forward, 6.5, 4),
+      center: hole.tee,
+    });
+  }
+  // Reorient every tee box so the short edge faces the fairway, not the green.
+  for (const t of hole.tees) {
+    const center = t.center ?? ([
+      t.polygon.reduce((s, p) => s + p[0], 0) / t.polygon.length,
+      t.polygon.reduce((s, p) => s + p[1], 0) / t.polygon.length,
+    ] as Vec2);
+    t.center = center;
+    const aim = fairwayDirection(hole, { x: center[0], z: center[1] });
+    t.polygon = orientedRect(center, aim, 6.5, 4);
+  }
 }
 
 function ensureFairway(hole: HoleData): void {

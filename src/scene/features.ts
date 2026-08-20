@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { CourseData, HoleData, Vec2 } from "../course/types";
-import { dist, greenPolygon, pointOnPath } from "../course/geom";
+import { dist, fairwayDirection, greenPolygon, pointOnPath } from "../course/geom";
 
 function shapeFromPoly(poly: Vec2[]): THREE.Shape {
   const s = new THREE.Shape();
@@ -36,10 +36,21 @@ export function addCourseFeatures(
     metalness: 0,
   });
   const teeMat = new THREE.MeshStandardMaterial({
-    color: 0x3f8a3c,
-    roughness: 0.8,
+    color: 0x4a9a48,
+    roughness: 0.78,
     metalness: 0,
   });
+  const teeEdgeMat = new THREE.MeshStandardMaterial({
+    color: 0x2f6d32,
+    roughness: 0.9,
+    metalness: 0,
+  });
+  const markerMats = [
+    new THREE.MeshStandardMaterial({ color: 0xf2f0ea, roughness: 0.45 }),
+    new THREE.MeshStandardMaterial({ color: 0x3d6fb5, roughness: 0.45 }),
+    new THREE.MeshStandardMaterial({ color: 0xc79a3c, roughness: 0.45 }),
+    new THREE.MeshStandardMaterial({ color: 0xe8e4da, roughness: 0.45 }),
+  ];
   const pathMat = new THREE.MeshStandardMaterial({
     color: 0x8a7b68,
     roughness: 0.95,
@@ -66,14 +77,10 @@ export function addCourseFeatures(
     mesh.receiveShadow = true;
     scene.add(mesh);
     scene.add(makeFlag(hole, heightAt));
-    for (const t of hole.tees) {
-      if (t.polygon.length < 4) continue;
-      const tgeo = new THREE.ShapeGeometry(shapeFromPoly(t.polygon), 2);
-      drapeGeometry(tgeo, heightAt, 0.1);
-      const tm = new THREE.Mesh(tgeo, teeMat);
-      tm.receiveShadow = true;
-      scene.add(tm);
-    }
+    hole.tees.forEach((t, i) => {
+      if (t.polygon.length < 4) return;
+      scene.add(makeTeeBox(hole, t.center, t.polygon, heightAt, teeMat, teeEdgeMat, markerMats[i % markerMats.length]));
+    });
   }
 
   for (const path of course.cartpaths) {
@@ -82,6 +89,53 @@ export function addCourseFeatures(
   }
 
   scene.add(makeLodge(course, heightAt));
+}
+
+function makeTeeBox(
+  hole: HoleData,
+  center: Vec2,
+  polygon: Vec2[],
+  heightAt: (x: number, z: number) => number,
+  surface: THREE.Material,
+  edge: THREE.Material,
+  marker: THREE.Material,
+): THREE.Group {
+  const group = new THREE.Group();
+  const forward = fairwayDirection(hole, { x: center[0], z: center[1] });
+  const yaw = Math.atan2(forward[0], forward[1]);
+  const y = heightAt(center[0], center[1]);
+
+  // Surface draped to the oriented polygon (already fairway-facing from repair).
+  const topGeo = new THREE.ShapeGeometry(shapeFromPoly(polygon), 2);
+  drapeGeometry(topGeo, heightAt, 0.18);
+  const top = new THREE.Mesh(topGeo, surface);
+  top.receiveShadow = true;
+  group.add(top);
+
+  // Raised pad so it reads as a real tee box, not a flat patch.
+  const pad = new THREE.Mesh(new THREE.BoxGeometry(13, 0.35, 8), edge);
+  pad.position.set(center[0], y + 0.12, center[1]);
+  pad.rotation.y = yaw;
+  pad.receiveShadow = true;
+  pad.castShadow = true;
+  group.add(pad);
+
+  // Front tee markers (short edge facing the fairway).
+  const rx = -forward[1];
+  const rz = forward[0];
+  const front = 3.6;
+  const side = 5.2;
+  for (const s of [-1, 1]) {
+    const mx = center[0] + forward[0] * front + rx * side * s;
+    const mz = center[1] + forward[1] * front + rz * side * s;
+    const my = heightAt(mx, mz) + 0.55;
+    const peg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.9, 8), marker);
+    peg.position.set(mx, my, mz);
+    peg.castShadow = true;
+    group.add(peg);
+  }
+
+  return group;
 }
 
 function makeRibbon(
