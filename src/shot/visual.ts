@@ -39,6 +39,61 @@ export function clearPreviewVisual(scene: THREE.Scene): void {
   removeNamed(scene, "shot-preview");
 }
 
+export function clearAimVisual(scene: THREE.Scene): void {
+  removeNamed(scene, "aim-target");
+}
+
+export function upsertAimVisual(
+  scene: THREE.Scene,
+  from: { x: number; y: number; z: number },
+  target: { x: number; y: number; z: number },
+  heightAt: (x: number, z: number) => number,
+  visible = true,
+): void {
+  removeNamed(scene, "aim-target");
+  if (!visible) return;
+  const group = new THREE.Group();
+  group.name = "aim-target";
+
+  const linePts: THREE.Vector3[] = [];
+  const dx = target.x - from.x;
+  const dz = target.z - from.z;
+  const len = Math.hypot(dx, dz);
+  const steps = Math.max(4, Math.round(len / 8));
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const x = from.x + dx * t;
+    const z = from.z + dz * t;
+    linePts.push(new THREE.Vector3(x, heightAt(x, z) + 0.35, z));
+  }
+  if (linePts.length >= 2) {
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(linePts),
+      new THREE.LineDashedMaterial({ color: 0xf2e6c4, dashSize: 3.2, gapSize: 2.2, transparent: true, opacity: 0.7 }),
+    );
+    line.computeLineDistances();
+    group.add(line);
+  }
+
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(1.15, 2.35, 22),
+    new THREE.MeshBasicMaterial({ color: 0xf0d59a, side: THREE.DoubleSide, transparent: true, opacity: 0.9 }),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(target.x, target.y + 0.2, target.z);
+  group.add(ring);
+
+  const disc = new THREE.Mesh(
+    new THREE.CircleGeometry(0.55, 16),
+    new THREE.MeshBasicMaterial({ color: 0xfff6d8, transparent: true, opacity: 0.85, side: THREE.DoubleSide }),
+  );
+  disc.rotation.x = -Math.PI / 2;
+  disc.position.set(target.x, target.y + 0.22, target.z);
+  group.add(disc);
+
+  scene.add(group);
+}
+
 export function upsertLieMarker(scene: THREE.Scene, x: number, y: number, z: number, lie: Lie, visible = true): void {
   let group = scene.getObjectByName("lie-marker") as THREE.Group | undefined;
   if (!group) {

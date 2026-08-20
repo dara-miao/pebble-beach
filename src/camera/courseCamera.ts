@@ -10,6 +10,7 @@ export interface CourseCamera {
     hole: HoleData,
     heightAt: (x: number, z: number) => number,
     fromBall?: [number, number],
+    lookAt?: [number, number],
   ) => void;
   update: (dt: number) => void;
   followShot: (points: THREE.Vector3[], duration?: number) => void;
@@ -52,7 +53,7 @@ export function createCourseCamera(canvas: HTMLCanvasElement): CourseCamera {
   controls.enableDamping = true;
   controls.dampingFactor = 0.07;
   controls.maxPolarAngle = Math.PI * 0.49;
-  controls.minDistance = 18;
+  controls.minDistance = 6;
   controls.maxDistance = 2200;
   controls.target.set(900, 8, 700);
   controls.rotateSpeed = 0.5;
@@ -116,14 +117,17 @@ export function createCourseCamera(canvas: HTMLCanvasElement): CourseCamera {
     hole: HoleData,
     heightAt: (x: number, z: number) => number,
     fromBall?: [number, number],
+    lookAt?: [number, number],
   ) => {
     pathFlight = null;
     const stance = fromBall ?? hole.tee;
+    const focus = lookAt ?? hole.pin;
     const green = hole.greenCenter;
     const stanceY = heightAt(stance[0], stance[1]);
     const greenY = heightAt(green[0], green[1]);
-    const dx = green[0] - stance[0];
-    const dz = green[1] - stance[1];
+    const focusY = heightAt(focus[0], focus[1]);
+    const dx = focus[0] - stance[0];
+    const dz = focus[1] - stance[1];
     const len = Math.hypot(dx, dz) || 1;
     const ux = dx / len;
     const uz = dz / len;
@@ -172,7 +176,13 @@ export function createCourseCamera(canvas: HTMLCanvasElement): CourseCamera {
     const toPos = new THREE.Vector3();
     const toTarget = new THREE.Vector3();
 
-    if (mode === "tee") {
+    if (mode === "address") {
+      const back = len < 22 ? 7 : len < 80 ? 9 : len < 200 ? 11 : 14;
+      const height = len < 22 ? 2.8 : len < 80 ? 3.6 : 4.8;
+      const look = Math.min(len, len < 28 ? len : Math.max(28, Math.min(90, len * 0.55)));
+      toPos.set(stance[0] - ux * back, stanceY + height, stance[1] - uz * back);
+      toTarget.set(stance[0] + ux * look, focusY + 1.2, stance[1] + uz * look);
+    } else if (mode === "tee") {
       toPos.set(stance[0] - ux * 32, stanceY + 11, stance[1] - uz * 32);
       toTarget.set(green[0], greenY + 3, green[1]);
     } else if (mode === "green") {

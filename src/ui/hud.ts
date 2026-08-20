@@ -1,6 +1,7 @@
 import type { CourseData, HoleData, TeeSet, CameraMode, Vec2 } from "../course/types";
 import type { Lie } from "../shot/lie";
-import { clubForYards } from "../shot/parse";
+import type { HoleShot } from "../shot/play";
+import { lieShort, type HereBook } from "../shot/yardage";
 
 export interface HudState {
   hole: number;
@@ -21,11 +22,14 @@ export interface ShotHudInfo {
   kind?: "preview" | "result";
   trouble?: string;
   land?: Vec2;
+  target?: Vec2;
+  plannedCarry?: number;
 }
 
 export interface PlayHudView {
   strokes: number;
   penalties: number;
+  scoreLabel: string;
   lie: Lie;
   lieLabel: string;
   remainingYards: number;
@@ -34,6 +38,10 @@ export interface PlayHudView {
   holed: boolean;
   onTee: boolean;
   ball: Vec2;
+  shots: HoleShot[];
+  book: HereBook;
+  suggestion: { label: string; prompt: string };
+  cardYards: number;
 }
 
 export interface HudHandlers {
@@ -63,11 +71,10 @@ export function renderHud(
   draft = "",
 ): void {
   const yards = hole.yards[state.tee];
-  const bunkers = hole.bunkers.slice(0, 5);
   const holes = Array.from({ length: 18 }, (_, i) => i + 1);
   const teeName = course.scorecard[state.tee]?.name ?? TEE_LABELS[state.tee];
   const chips = shotChips(play);
-  const placeholder = shotPlaceholder(play);
+  const placeholder = play.suggestion.prompt;
 
   el.innerHTML = `
     <div class="panel brand">
@@ -109,6 +116,7 @@ export function renderHud(
           <b>${play.holed ? "Holed" : play.leftoverLabel.replace(" to pin", "")}</b>
         </div>
       </div>
+      ${shotListHtml(play)}
     </div>
 
     <nav class="holes">
@@ -132,9 +140,10 @@ export function renderHud(
       </div>
       <div class="control-block">
         <span class="label">Camera</span>
-        <div class="seg">
-          <button type="button" data-cam="tee" class="${state.camera === "tee" ? "on" : ""}">${play.onTee ? "Tee" : "Ball"}</button>
-          <button type="button" data-cam="flyover" class="${state.camera === "flyover" ? "on" : ""}">Flyover</button>
+        <div class="seg cam-seg">
+          <button type="button" data-cam="address" class="${state.camera === "address" ? "on" : ""}">Stand</button>
+          <button type="button" data-cam="tee" class="${state.camera === "tee" ? "on" : ""}">Tee</button>
+          <button type="button" data-cam="flyover" class="${state.camera === "flyover" ? "on" : ""}">Fly</button>
           <button type="button" data-cam="green" class="${state.camera === "green" ? "on" : ""}">Green</button>
           <button type="button" data-cam="overview" class="${state.camera === "overview" ? "on" : ""}">Course</button>
         </div>
@@ -168,29 +177,15 @@ export function renderHud(
 
     <div class="panel book">
       <div class="book-head">
-        <h2>Yardage book</h2>
+        <h2>From here</h2>
       </div>
       <canvas class="mini" width="340" height="140"></canvas>
-      <ul>
-        <li><span>Scorecard</span><b>${yards} yds</b></li>
-        <li><span>To pin</span><b>${play.holed ? "Holed" : play.leftoverLabel.replace(" to pin", "")}</b></li>
-        <li><span>Ball lie</span><b>${play.lieLabel}</b></li>
-        ${
-          play.penalties
-            ? `<li><span>Penalties</span><b>${play.penalties}</b></li>`
-            : ""
-        }
-        ${bunkers
-          .map(
-            (b) =>
-              `<li><span>Bunker ${b.side} at ${Math.round(b.yardsFromTee)}</span><b>${Math.round(b.yardsToGreen)} to green</b></li>`,
-          )
-          .join("")}
-        ${hole.bunkers.length === 0 ? "<li><span>No mapped bunkers</span><b>-</b></li>" : ""}
+      <ul class="book-list">
+        ${bookListHtml(play, shot, yards)}
       </ul>
     </div>
 
-    <p class="hint">Type a shot to preview the real flight · aim 10 left / putt 20 ft · Hit to play it · r resets</p>
+    <p class="hint">Stand looks down the line · click the hole to aim · ${play.suggestion.label} · r resets</p>
   `;
 
   el.querySelectorAll<HTMLButtonElement>("[data-hole]").forEach((btn) => {
@@ -239,6 +234,10 @@ export function updateShotPanel(
   if (mini) drawMinimap(mini, hole, play.ball, shot);
   const left = el.querySelector(".play-status .play-stat:nth-child(3) b");
   if (left) left.textContent = play.holed ? "Holed" : play.leftoverLabel.replace(" to pin", "");
+  const book = el.querySelector(".book-list");
+  if (book) book.innerHTML = bookListHtml(play, shot, play.cardYards);
+  const hint = el.querySelector(".hint");
+  if (hint) hint.textContent = `Stand looks down the line · click the hole to aim · ${play.suggestion.label} · r resets`;
 }
 
 function shotPanelHtml(shot: ShotHudInfo | undefined, play: PlayHudView): string {
@@ -263,50 +262,72 @@ function shotPanelHtml(shot: ShotHudInfo | undefined, play: PlayHudView): string
   </div>`;
 }
 
-function shotChips(play: PlayHudView): { label: string; prompt: string }[] {
-  if (play.holed) return [];
-  const left = Math.max(8, Math.round(play.remainingYards));
-  if (play.lie === "ocean") {
-    return [
-      { label: "pw after drop", prompt: "pw 80" },
-      { label: "7i after drop", prompt: "7 iron 140" },
-    ];
+function shotListHtml(play: PlayHudView): string {
+  if (!play.shots.length && !play.holed) {
+    return `<p class="card-empty">No shots yet · score ${play.scoreLabel}</p>`;
   }
-  if (play.lie === "bunker" || play.lie === "sand") {
-    return [
-      { label: "sw splash 35", prompt: "sw 35" },
-      { label: "lw 20", prompt: "lw 20" },
-    ];
-  }
-  if (play.lie === "green" || left <= 18) {
-    const feet = Math.max(3, Math.round(play.pinYards * 3));
-    return [
-      { label: `putt ${feet} ft`, prompt: `putt ${feet} ft` },
-      { label: "lag putt", prompt: `putt ${Math.max(4, Math.round(feet * 0.75))} ft` },
-    ];
-  }
-  if (play.lie === "woods") {
-    return [
-      { label: "punch 7i", prompt: "7 iron 120" },
-      { label: "punch 8i", prompt: "8 iron 90" },
-    ];
-  }
-  const club = clubForYards(left);
-  return [
-    { label: `${club} ${left}`, prompt: `${club} ${left}` },
-    { label: `${club} draw`, prompt: `${club} ${left} draw` },
-    { label: `${club} fade`, prompt: `${club} ${left} fade` },
-  ];
+  const rows = play.shots
+    .map((s, i) => {
+      const left = s.leftoverUnit === "" ? "holed" : `${s.leftover} ${s.leftoverUnit}`;
+      return `<li><em>${i + 1}</em><span>${s.clubLabel} ${s.carryYards}/${s.totalYards}</span><b>${lieShort(s.lieIn)} → ${lieShort(s.lieOut)} · ${left}</b></li>`;
+    })
+    .join("");
+  return `<div class="card">
+    <ol>${rows}</ol>
+    <p class="card-score">Score <b>${play.holed ? play.strokes : play.scoreLabel}</b>${play.penalties ? ` · ${play.penalties} pen` : ""}</p>
+  </div>`;
 }
 
-function shotPlaceholder(play: PlayHudView): string {
-  if (play.holed) return "holed out";
-  if (play.lie === "bunker" || play.lie === "sand") return "sw 35 splash";
-  if (play.lie === "ocean") return "pw 80 after drop";
-  if (play.lie === "woods") return "7 iron punch 120";
-  if (play.lie === "green") return `putt ${Math.max(3, Math.round(play.pinYards * 3))} ft`;
-  const left = Math.round(play.remainingYards);
-  return `${clubForYards(left)} ${left}`;
+function bookListHtml(play: PlayHudView, shot: ShotHudInfo | undefined, cardYards: number): string {
+  const carry = shot?.plannedCarry ?? shot?.carry;
+  const hazards = play.book.hazards.slice(0, 4);
+  const cover = play.book.firstTrouble;
+  const coverLine = cover
+    ? carry == null
+      ? `need ${cover.exitYards} to cover ${cover.label.toLowerCase()}`
+      : clearStatusLine(cover, carry)
+    : "nothing on the line";
+  return `
+    <li><span>To pin</span><b>${play.holed ? "Holed" : play.leftoverLabel.replace(" to pin", "")}</b></li>
+    <li><span>Play</span><b>${play.suggestion.label}</b></li>
+    <li><span>In play</span><b>${coverLine}</b></li>
+    ${hazards
+      .map((h) => {
+        const extra = carry == null ? `${h.exitYards} to cover` : clearStatusLine(h, carry);
+        return `<li><span>${h.label}</span><b>${extra}</b></li>`;
+      })
+      .join("")}
+    <li><span>Card</span><b>${cardYards} yds</b></li>
+  `;
+}
+
+function clearStatusLine(hazard: { label: string; carryYards: number; exitYards: number }, carry: number): string {
+  if (carry + 0.5 < hazard.carryYards) return `${hazard.carryYards} · short (need ${hazard.exitYards})`;
+  if (carry + 0.5 < hazard.exitYards) return `${hazard.carryYards} · in it`;
+  return `${hazard.carryYards} · covers`;
+}
+
+function shotChips(play: PlayHudView): { label: string; prompt: string }[] {
+  if (play.holed) return [];
+  const suggested = play.suggestion;
+  if (play.lie === "ocean") {
+    return [suggested, { label: "7i after drop", prompt: "7 iron 140" }];
+  }
+  if (play.lie === "bunker" || play.lie === "sand") {
+    return [suggested, { label: "lw 20", prompt: "lw 20" }];
+  }
+  if (play.lie === "green" || play.remainingYards <= 18) {
+    const feet = Math.max(3, Math.round(play.pinYards * 3));
+    return [suggested, { label: "lag putt", prompt: `putt ${Math.max(4, Math.round(feet * 0.75))} ft` }];
+  }
+  if (play.lie === "woods") {
+    return [suggested, { label: "punch 8i", prompt: "8 iron 90" }];
+  }
+  return [
+    suggested,
+    { label: `${suggested.label} draw`, prompt: `${suggested.prompt} draw` },
+    { label: `${suggested.label} fade`, prompt: `${suggested.prompt} fade` },
+  ];
 }
 
 function escapeAttr(value: string): string {
@@ -318,6 +339,7 @@ function drawMinimap(canvas: HTMLCanvasElement, hole: HoleData, ball: Vec2, shot
   if (!ctx) return;
   const extras: Vec2[] = [ball];
   if (shot?.land) extras.push(shot.land);
+  if (shot?.target) extras.push(shot.target);
   const pts = [...hole.path, hole.greenCenter, hole.tee, ...hole.bunkers.map((b) => b.center), ...extras];
   const xs = pts.map((p) => p[0]);
   const zs = pts.map((p) => p[1]);
@@ -371,6 +393,21 @@ function drawMinimap(canvas: HTMLCanvasElement, hole: HoleData, ball: Vec2, shot
   ctx.fill();
 
   const [bx, by] = map(ball);
+  if (shot?.target) {
+    const [ax, ay] = map(shot.target);
+    ctx.strokeStyle = "rgba(240, 213, 154, 0.55)";
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(ax, ay);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#f0d59a";
+    ctx.beginPath();
+    ctx.arc(ax, ay, 3.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
   if (shot?.land) {
     const [lx, ly] = map(shot.land);
     ctx.strokeStyle = shot.trouble === "ocean" ? "rgba(62,198,232,0.9)" : shot.trouble === "bunker" ? "rgba(232,197,106,0.9)" : "rgba(154,212,255,0.75)";

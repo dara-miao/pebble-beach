@@ -22,6 +22,7 @@ export interface ShotTrouble {
 
 export interface ShotResult {
   points: ShotPoint[];
+  club: ShotRequest["club"];
   carryYards: number;
   rollYards: number;
   totalYards: number;
@@ -40,7 +41,7 @@ export interface ShotResult {
   elevNote: string;
   penaltyStrokes: number;
   trouble: ShotTrouble;
-  aim: { ux: number; uz: number; leftYards: number };
+  aim: { ux: number; uz: number; leftYards: number; target: { x: number; z: number } };
 }
 
 function shapeLateral(shape: ShotRequest["shape"], t: number, carry: number): number {
@@ -61,19 +62,53 @@ function shapeLateral(shape: ShotRequest["shape"], t: number, carry: number): nu
   return peak * Math.sin(t * Math.PI);
 }
 
-export function resolveAim(
-  hole: HoleData,
-  origin: { x: number; z: number },
-  req: Pick<ShotRequest, "aimYardsLeft" | "landYards">,
-): { ux: number; uz: number; rx: number; rz: number; leftYards: number } {
-  const pin: [number, number] = [hole.pin[0], hole.pin[1]];
+export function pinFrame(origin: { x: number; z: number }, pin: [number, number]) {
   const toPinX = pin[0] - origin.x;
   const toPinZ = pin[1] - origin.z;
   const pinLen = Math.hypot(toPinX, toPinZ) || 1;
   const pux = toPinX / pinLen;
   const puz = toPinZ / pinLen;
-  const prx = -puz;
-  const prz = pux;
+  return { pux, puz, prx: -puz, prz: pux, pinLen };
+}
+
+/** Convert a world landing point into pin-line carry and yards left of that line. */
+export function aimFromPoint(
+  origin: { x: number; z: number },
+  pin: [number, number],
+  target: { x: number; z: number },
+): { landYards: number; aimYardsLeft: number; ux: number; uz: number; rx: number; rz: number } {
+  const { pux, puz, prx, prz } = pinFrame(origin, pin);
+  const vx = target.x - origin.x;
+  const vz = target.z - origin.z;
+  const landYards = vx * pux + vz * puz;
+  const aimYardsLeft = vx * prx + vz * prz;
+  let ux = vx;
+  let uz = vz;
+  const len = Math.hypot(ux, uz) || 1;
+  ux /= len;
+  uz /= len;
+  return { landYards, aimYardsLeft, ux, uz, rx: -uz, rz: ux };
+}
+
+export function resolveAim(
+  hole: HoleData,
+  origin: { x: number; z: number },
+  req: Pick<ShotRequest, "aimYardsLeft" | "landYards" | "target">,
+): { ux: number; uz: number; rx: number; rz: number; leftYards: number; target: { x: number; z: number } } {
+  const pin: [number, number] = [hole.pin[0], hole.pin[1]];
+  const { pux, puz, prx, prz, pinLen } = pinFrame(origin, pin);
+
+  if (req.target) {
+    const aimed = aimFromPoint(origin, pin, req.target);
+    return {
+      ux: aimed.ux,
+      uz: aimed.uz,
+      rx: aimed.rx,
+      rz: aimed.rz,
+      leftYards: aimed.aimYardsLeft,
+      target: { x: req.target.x, z: req.target.z },
+    };
+  }
 
   let tx = pin[0];
   let tz = pin[1];
@@ -92,7 +127,7 @@ export function resolveAim(
   const len = Math.hypot(ux, uz) || 1;
   ux /= len;
   uz /= len;
-  return { ux, uz, rx: -uz, rz: ux, leftYards: left };
+  return { ux, uz, rx: -uz, rz: ux, leftYards: left, target: { x: tx, z: tz } };
 }
 
 function elevationDelta(
@@ -288,6 +323,7 @@ export function simulateShot(
 
   return {
     points,
+    club: req.club,
     carryYards: Math.round(carry),
     rollYards: Math.round(rollYards),
     totalYards: Math.round(carry + rollYards),
@@ -306,6 +342,6 @@ export function simulateShot(
     elevNote,
     penaltyStrokes,
     trouble,
-    aim: { ux, uz, leftYards: aim.leftYards },
+    aim: { ux, uz, leftYards: aim.leftYards, target: aim.target },
   };
 }

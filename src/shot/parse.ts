@@ -30,6 +30,8 @@ export interface ShotRequest {
   aimYardsLeft: number;
   /** Optional landing target, yards from the ball along the pin line. */
   landYards?: number;
+  /** World landing point; when set, aim is ball → this point. */
+  target?: { x: number; z: number };
 }
 
 const CLUB_ALIASES: Record<string, Club> = {
@@ -185,6 +187,34 @@ export function parseShotPrompt(raw: string): ShotRequest {
     landYards,
   };
 }
+
+export function promptSpecifiesAim(raw: string): boolean {
+  const text = raw.trim().toLowerCase();
+  return (
+    /(?:aim\s+)?\d{1,2}\s*(?:yds?|yards?)?\s*(left|right)(?:\s+of(?:\s+the)?\s+pin)?\b/.test(text) ||
+    /\baim\s+(left|right)\b/.test(text) ||
+    /\b(?:land(?:ing)?|target|at)\s+\d{2,3}\s*(?:yds?|yards?)?\s*(?:out)?\b/.test(text) ||
+    /\bfrom\s+\d{2,3}\s*(?:yds?|yards?)?\s*(?:out)?\b/.test(text)
+  );
+}
+
+export const CLUB_LABEL: Record<Club, string> = {
+  driver: "driver",
+  "3wood": "3w",
+  "5wood": "5w",
+  hybrid: "hybrid",
+  "4iron": "4i",
+  "5iron": "5i",
+  "6iron": "6i",
+  "7iron": "7i",
+  "8iron": "8i",
+  "9iron": "9i",
+  pw: "pw",
+  gw: "gw",
+  sw: "sw",
+  lw: "lw",
+  putter: "putt",
+};
 
 export function describeShot(req: ShotRequest, fromLie?: string): string {
   const wind =

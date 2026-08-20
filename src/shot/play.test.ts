@@ -4,7 +4,8 @@ import type { Cover } from "../scene/cover";
 import { parseShotPrompt } from "./parse";
 import { applyLieToCarry } from "./lie";
 import { applyShotResult, ballAt, createHolePlay, pinDistance3d, resolveOrigin } from "./play";
-import { simulateShot } from "./simulate";
+import { aimFromPoint, simulateShot } from "./simulate";
+import { bookFromHere, clearStatus, suggestShot } from "./yardage";
 
 function mockHole(over: Partial<HoleData> = {}): HoleData {
   return {
@@ -105,6 +106,74 @@ describe("sequential lie play", () => {
     expect(play.ball.remainingYards).toBeCloseTo(endDist, 5);
     expect(result.remainingYards).toBeCloseTo(endDist, 5);
     expect(result.end.pinYards).toBeCloseTo(endDist, 5);
+  });
+
+  it("reports ball-to-pin leftover from a mid-hole lie, not the scorecard", () => {
+    const hole = mockHole();
+    const mid = ballAt(4, 58, hole, coverAt);
+    expect(mid.remainingYards).toBeCloseTo(pinDistance3d(4, 58, hole), 5);
+    expect(mid.remainingYards).not.toBe(hole.yards.blue);
+    expect(mid.remainingYards).toBeGreaterThan(35);
+    expect(mid.remainingYards).toBeLessThan(55);
+  });
+
+  it("matches preview to Hit when aiming at a world landing target", () => {
+    const hole = mockHole();
+    const origin = ballAt(0, 0, hole, coverAt);
+    const target = { x: -10, z: 72 };
+    const aimed = aimFromPoint(origin, hole.pin, target);
+    const req = { ...parseShotPrompt("7 iron 70"), target, landYards: aimed.landYards, aimYardsLeft: aimed.aimYardsLeft };
+    const preview = simulateShot(hole, req, heightAt, coverAt, origin);
+    const hit = simulateShot(hole, req, heightAt, coverAt, origin);
+    const pinLine = simulateShot(hole, parseShotPrompt("7 iron 70"), heightAt, coverAt, origin);
+    expect(hit.end.x).toBeCloseTo(preview.end.x, 8);
+    expect(hit.end.z).toBeCloseTo(preview.end.z, 8);
+    expect(hit.remainingYards).toBeCloseTo(preview.remainingYards, 8);
+    expect(hit.carryYards).toBe(preview.carryYards);
+    expect(hit.trouble).toEqual(preview.trouble);
+    expect(hit.aim.target.x).toBeCloseTo(target.x, 5);
+    expect(hit.aim.target.z).toBeCloseTo(target.z, 5);
+    expect(hit.end.x).toBeLessThan(pinLine.end.x - 4);
+    expect(aimed.aimYardsLeft).toBeGreaterThan(6);
+  });
+
+  it("gives hazard-clear numbers from a mid-hole lie", () => {
+    const hole = mockHole();
+    const origin = ballAt(0, 40, hole, coverAt);
+    expect(origin.remainingYards).toBeCloseTo(pinDistance3d(0, 40, hole), 5);
+    const book = bookFromHere(origin, hole, { ux: 0, uz: 1 }, coverAt);
+    expect(book.firstTrouble?.kind).toBe("bunker");
+    expect(book.firstTrouble!.carryYards).toBeGreaterThan(30);
+    expect(book.firstTrouble!.carryYards).toBeLessThan(50);
+    expect(book.coverYards).toBeGreaterThan(book.firstTrouble!.carryYards);
+    expect(clearStatus(20, book.firstTrouble!)).toBe("short");
+    expect(clearStatus(book.firstTrouble!.exitYards + 4, book.firstTrouble!)).toBe("covers");
+    const short = simulateShot(hole, parseShotPrompt("pw 20"), heightAt, coverAt, origin);
+    expect(short.carryYards).toBeLessThan(book.firstTrouble!.carryYards);
+    const cover = simulateShot(hole, parseShotPrompt(`pw ${book.coverYards! + 8}`), heightAt, coverAt, origin);
+    expect(cover.carryYards).toBeGreaterThanOrEqual(book.firstTrouble!.exitYards);
+  });
+
+  it("suggests a bunker splash, fairway iron, or putt from leftover + lie", () => {
+    expect(suggestShot("bunker", 28, 28).prompt).toMatch(/sw /);
+    expect(suggestShot("fairway", 155, 155).club).toBe("7iron");
+    expect(suggestShot("green", 8, 8).prompt).toMatch(/putt \d+ ft/);
+    expect(suggestShot("woods", 140, 140).prompt).toMatch(/7 iron/);
+  });
+
+  it("records the hole story and clears it on reset", () => {
+    const hole = mockHole();
+    const first = playShot(createHolePlay(hole, "blue", coverAt), hole, "7 iron 70");
+    expect(first.play.shots).toHaveLength(1);
+    expect(first.play.shots[0].club).toBe("7iron");
+    expect(first.play.shots[0].lieIn).toBe("tee");
+    expect(first.play.shots[0].leftover).toBeGreaterThan(0);
+    const second = playShot(first.play, hole, "pw 30");
+    expect(second.play.shots).toHaveLength(2);
+    expect(second.play.strokes).toBe(2);
+    const reset = createHolePlay(hole, "blue", coverAt);
+    expect(reset.shots).toHaveLength(0);
+    expect(reset.strokes).toBe(0);
   });
 
   it("uses the same flight, land, leftover, and trouble for preview and hit", () => {
