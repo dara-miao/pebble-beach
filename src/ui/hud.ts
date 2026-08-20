@@ -32,6 +32,7 @@ export interface ShotHudInfo {
 }
 
 export interface PlayHudView {
+  holeNumber: number;
   strokes: number;
   penalties: number;
   scoreLabel: string;
@@ -293,7 +294,9 @@ export function updateShotPanel(
 
 function shotPanelHtml(shot: ShotHudInfo | undefined, play: PlayHudView): string {
   if (play.holed) {
-    return `<p class="idle">Holed out in ${play.strokes}${play.penalties ? ` (${play.penalties} penalty)` : ""}. Reset the hole to play it again.</p>`;
+    const pen = play.penalties ? ` (${play.penalties} penalty)` : "";
+    const next = play.holeNumber >= 18 ? "Round complete. New round to play again." : "Next tee shortly — or reset this hole.";
+    return `<p class="idle">Holed out in ${play.strokes}${pen}. ${next}</p>`;
   }
   if (!shot?.outcome) {
     return `<p class="idle">Type a club and yards. Preview is the real flight — carry, roll, leftover, and trouble — before you Hit.</p>`;

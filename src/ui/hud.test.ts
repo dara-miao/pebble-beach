@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import { loadCourse } from "../course/load";
 import { buildCoverIndex, heightAt as sampleHeight } from "../scene/cover";
 import { createPlaySession } from "../shot/session";
+import { holeOutBeatFrom, shotStingFrom } from "../shot/juice";
 import { renderHud, shotChips, type HudHandlers } from "./hud";
+import { renderJuice } from "./juice";
 
 const course = loadCourse();
 const index = buildCoverIndex(course);
@@ -96,5 +98,40 @@ describe("HUD control wiring", () => {
     expect(input.value.toLowerCase()).toMatch(/fade/);
     el.querySelector<HTMLFormElement>(".shot-form")!.requestSubmit();
     expect(onShot).toHaveBeenCalledWith(input.value);
+  });
+});
+
+describe("juice overlay", () => {
+  it("renders a shot sting and a hole-out banner, with New round on 18", () => {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    renderJuice(
+      el,
+      shotStingFrom({
+        landLie: "green",
+        remainingYards: 14,
+        leftoverLabel: "42 ft to pin",
+        penaltyStrokes: 0,
+        trouble: { ocean: false, bunker: false, woods: false },
+      }),
+    );
+    expect(el.hidden).toBe(false);
+    expect(el.textContent).toMatch(/Nice/i);
+    expect(el.querySelector(".juice-toast")).toBeTruthy();
+
+    renderJuice(el, holeOutBeatFrom({ holeNumber: 7, strokes: 2 }, 3, "E"));
+    expect(el.textContent).toMatch(/Birdie/i);
+    expect(el.textContent).toMatch(/Hole 7/);
+    expect(el.textContent).toMatch(/hole 8/i);
+
+    const onNewRound = vi.fn();
+    renderJuice(el, holeOutBeatFrom({ holeNumber: 18, strokes: 5 }, 5, "E"), { onNewRound });
+    expect(el.textContent).toMatch(/Round complete/i);
+    el.querySelector<HTMLButtonElement>("[data-juice-new-round]")!.click();
+    expect(onNewRound).toHaveBeenCalled();
+
+    renderJuice(el, null);
+    expect(el.hidden).toBe(true);
+    expect(el.innerHTML).toBe("");
   });
 });

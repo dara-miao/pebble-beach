@@ -9,6 +9,7 @@ import { addCourseFeatures, addYardageMarkers } from "./scene/features";
 import { addTrees } from "./scene/trees";
 import { createCourseCamera } from "./camera/courseCamera";
 import { renderHud, updateShotPanel } from "./ui/hud";
+import { renderJuice } from "./ui/juice";
 import { resolveOrigin } from "./shot/play";
 import { createPlaySession } from "./shot/session";
 import { clearAimVisual, clearPreviewVisual, playShotVisual, showPreviewVisual, upsertAimVisual, upsertLieMarker, type ShotVisual } from "./shot/visual";
@@ -17,6 +18,7 @@ const course = loadCourse();
 
 const canvas = document.querySelector<HTMLCanvasElement>("#view")!;
 const hudEl = document.querySelector<HTMLElement>("#hud")!;
+const juiceEl = document.querySelector<HTMLElement>("#juice")!;
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -136,6 +138,7 @@ const cam = createCourseCamera(canvas);
 let markers = new THREE.Group();
 let activeShot: ShotVisual | null = null;
 let previewTimer = 0;
+let juiceTimer = 0;
 
 function lookAtPoint(): [number, number] {
   if (session.aimTarget) return [session.aimTarget.x, session.aimTarget.z];
@@ -197,8 +200,49 @@ function clearShotVisuals() {
   old?.parent?.remove(old);
 }
 
+function hideJuice() {
+  window.clearTimeout(juiceTimer);
+  renderJuice(juiceEl, null);
+}
+
+function showLandedJuice() {
+  const beat = session.juice;
+  if (!beat) return;
+  renderJuice(juiceEl, beat, { onNewRound: newRound });
+  const token = session.juiceToken;
+  window.clearTimeout(juiceTimer);
+  juiceTimer = window.setTimeout(() => {
+    if (session.juiceToken !== token) return;
+    const change = session.advanceAfterBeat();
+    if (change?.holeChanged) {
+      hideJuice();
+      refreshPlayView(change);
+      return;
+    }
+    if (!session.juice || session.juice.kind === "shot") renderJuice(juiceEl, null);
+  }, beat.holdMs);
+}
+
+function refreshPlayView(change: ReturnType<typeof session.applyChange>) {
+  const cameraOnly = change.cameraChanged && !change.holeChanged && !change.teeChanged;
+  if (change.holeChanged || change.teeChanged) clearShotVisuals();
+  const hole = session.holeData;
+  if (!cameraOnly) {
+    markers.removeFromParent();
+    markers = addYardageMarkers(scene, hole, terrain.heightAt);
+    placeLieMarker(true);
+    fitShadow(hole);
+  }
+  setCamera();
+  refreshHud();
+  if ((change.holeChanged || change.teeChanged) && session.lastSim) {
+    showPreviewVisual(scene, session.lastSim.result, session.lastSim.envelope, terrain.heightAt);
+  }
+}
+
 function resetHole() {
   session.resetHole();
+  hideJuice();
   clearShotVisuals();
   placeLieMarker(true);
   setCamera();
@@ -207,6 +251,7 @@ function resetHole() {
 
 function newRound() {
   session.newRound();
+  hideJuice();
   clearShotVisuals();
   const hole = session.holeData;
   markers.removeFromParent();
@@ -225,21 +270,8 @@ function applyWind(next: Parameters<typeof session.applyWind>[0]) {
 }
 
 function applyHole(next: Parameters<typeof session.applyChange>[0]) {
-  const change = session.applyChange(next);
-  const cameraOnly = change.cameraChanged && !change.holeChanged && !change.teeChanged && next.hole == null && next.tee == null;
-  if (change.holeChanged || change.teeChanged) clearShotVisuals();
-  const hole = session.holeData;
-  if (!cameraOnly) {
-    markers.removeFromParent();
-    markers = addYardageMarkers(scene, hole, terrain.heightAt);
-    placeLieMarker(true);
-    fitShadow(hole);
-  }
-  setCamera();
-  refreshHud();
-  if ((change.holeChanged || change.teeChanged) && session.lastSim) {
-    showPreviewVisual(scene, session.lastSim.result, session.lastSim.envelope, terrain.heightAt);
-  }
+  hideJuice();
+  refreshPlayView(session.applyChange(next));
 }
 
 function queuePreview(prompt: string) {
@@ -262,6 +294,8 @@ function previewShot(prompt: string) {
 function fireShot(prompt: string) {
   const sim = session.fireShot(prompt);
   if (!sim) return;
+  window.clearTimeout(juiceTimer);
+  renderJuice(juiceEl, null);
   placeLieMarker(false);
   activeShot = playShotVisual(scene, sim.result, Math.max(2.6, Math.min(4.2, sim.result.totalYards / 80)));
   cam.followShot(
@@ -299,7 +333,14 @@ function tick() {
     if (done) {
       activeShot = null;
       placeLieMarker(true);
-      if (session.state.camera === "address" || session.state.camera === "tee") setCamera();
+      const celebrating = session.juice?.kind === "hole-out" || session.juice?.kind === "round-done";
+      if (celebrating) {
+        const pin = session.holeData.pin;
+        cam.setMode("green", session.holeData, terrain.heightAt, ballSample(), [pin[0], pin[1]]);
+      } else if (session.state.camera === "address" || session.state.camera === "tee") {
+        setCamera();
+      }
+      showLandedJuice();
     }
   }
   const waterUniforms = (ocean.material as THREE.ShaderMaterial).uniforms;

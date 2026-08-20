@@ -265,15 +265,27 @@ export function playShotVisual(scene: THREE.Scene, result: ShotResult, duration 
   group.add(ball);
 
   const land = trailPts[trailPts.length - 1];
+  const holed = result.leftoverLabel === "Holed" || result.remainingYards <= 0;
+  const ringTint = holed ? 0xf0d59a : tint;
   const ring = new THREE.Mesh(
-    new THREE.RingGeometry(1.2, 2.4, 24),
-    new THREE.MeshBasicMaterial({ color: tint, side: THREE.DoubleSide, transparent: true, opacity: 0.9 }),
+    new THREE.RingGeometry(holed ? 1.6 : 1.2, holed ? 3.2 : 2.4, 24),
+    new THREE.MeshBasicMaterial({ color: ringTint, side: THREE.DoubleSide, transparent: true, opacity: 0.9 }),
   );
   ring.rotation.x = -Math.PI / 2;
   ring.position.copy(land);
   ring.position.y += 0.25;
   ring.visible = false;
   group.add(ring);
+
+  const bloom = new THREE.Mesh(
+    new THREE.RingGeometry(2.1, 2.45, 24),
+    new THREE.MeshBasicMaterial({ color: ringTint, side: THREE.DoubleSide, transparent: true, opacity: 0 }),
+  );
+  bloom.rotation.x = -Math.PI / 2;
+  bloom.position.copy(land);
+  bloom.position.y += 0.22;
+  bloom.visible = false;
+  group.add(bloom);
 
   removeNamed(scene, "shot-visual");
   removeNamed(scene, "shot-preview");
@@ -289,7 +301,14 @@ export function playShotVisual(scene: THREE.Scene, result: ShotResult, duration 
     const eased = 1 - Math.pow(1 - u, 1.6);
     const pos = curve.getPoint(eased);
     ball.position.copy(pos);
-    if (u >= 0.98) ring.visible = true;
+    if (u >= 0.98) {
+      ring.visible = true;
+      bloom.visible = true;
+      const age = Math.min(1, (u - 0.98) / 0.02);
+      const pulse = 1 + age * (holed ? 1.35 : 0.55);
+      bloom.scale.set(pulse, pulse, pulse);
+      if (bloom.material instanceof THREE.MeshBasicMaterial) bloom.material.opacity = 0.42 * (1 - age);
+    }
     if (tube.material instanceof THREE.MeshBasicMaterial) tube.material.opacity = 0.35 + (1 - u) * 0.5;
     return u >= 1;
   };

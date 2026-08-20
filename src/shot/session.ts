@@ -18,6 +18,7 @@ import { createRound, resetRound, roundThru, syncHoleScore, type RoundCard } fro
 import { DEFAULT_WIND, normalizeWind, windOnShotCopy, type WindCondition } from "./wind";
 import { lieLabel } from "./lie";
 import { bookFromHere, suggestShot } from "./yardage";
+import { holeOutBeatFrom, shotStingFrom, type JuiceBeat } from "./juice";
 
 export interface SessionSim {
   result: ShotResult;
@@ -47,6 +48,13 @@ export function createPlaySession(
   let draftPrompt = "";
   let shotInfo: ShotHudInfo | undefined;
   let lastSim: SessionSim | null = null;
+  let juice: JuiceBeat | null = null;
+  let juiceToken = 0;
+
+  function setJuice(next: JuiceBeat | null) {
+    juiceToken += 1;
+    juice = next;
+  }
 
   function hole(): HoleData {
     return holeByNumber(course, state.hole);
@@ -176,6 +184,7 @@ export function createPlaySession(
     const book = bookFromHere(origin, holeData, aim, coverAt, planned, targetYards);
     const suggestion = play.ball.holed ? { label: "holed out", prompt: "" } : book.suggest;
     return {
+      holeNumber: play.holeNumber,
       strokes: play.strokes,
       penalties: play.penalties,
       scoreLabel: scoreCopy(play),
@@ -256,6 +265,11 @@ export function createPlaySession(
       missDanger: undefined,
       missLandings: undefined,
     };
+    if (play.ball.holed) {
+      setJuice(holeOutBeatFrom(play, holeData.par, roundThru(round).label));
+    } else {
+      setJuice(shotStingFrom(sim.result));
+    }
     aimTarget = null;
     draftPrompt = defaultPrompt();
     return sim;
@@ -267,6 +281,7 @@ export function createPlaySession(
     const cameraChanged = next.camera != null && next.camera !== state.camera;
     Object.assign(state, next);
     if (teeChanged) {
+      setJuice(null);
       plays.clear();
       round = createRound(course, state.tee);
       adoptPlay(createHolePlay(hole(), state.tee, coverAt));
@@ -275,6 +290,7 @@ export function createPlaySession(
       aimTarget = null;
       draftPrompt = defaultPrompt();
     } else if (holeChanged) {
+      setJuice(null);
       play = ensurePlay(state.hole);
       shotInfo = play.lastShot ? resultFromLast() : undefined;
       lastSim = null;
@@ -294,6 +310,7 @@ export function createPlaySession(
   }
 
   function resetHole() {
+    setJuice(null);
     adoptPlay(createHolePlay(hole(), state.tee, coverAt));
     shotInfo = undefined;
     lastSim = null;
@@ -302,6 +319,7 @@ export function createPlaySession(
   }
 
   function newRound() {
+    setJuice(null);
     plays.clear();
     round = resetRound(round);
     state.hole = OPENING_HOLE;
@@ -310,6 +328,15 @@ export function createPlaySession(
     lastSim = null;
     aimTarget = null;
     draftPrompt = defaultPrompt();
+  }
+
+  function advanceAfterBeat(): SessionChange | null {
+    const beat = juice;
+    if (!beat || beat.kind !== "hole-out" || beat.nextHole == null) {
+      if (beat?.kind === "shot") setJuice(null);
+      return null;
+    }
+    return applyChange({ hole: beat.nextHole });
   }
 
   function setAimFromGround(point: { x: number; z: number }): { prompt: string; target: { x: number; z: number } } | null {
@@ -371,6 +398,12 @@ export function createPlaySession(
     get lastSim() {
       return lastSim;
     },
+    get juice() {
+      return juice;
+    },
+    get juiceToken() {
+      return juiceToken;
+    },
     get holeData() {
       return hole();
     },
@@ -381,6 +414,7 @@ export function createPlaySession(
     applyWind,
     resetHole,
     newRound,
+    advanceAfterBeat,
     setAimFromGround,
     handleKey,
     defaultPrompt,
