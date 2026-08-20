@@ -89,7 +89,7 @@ export function windLabel(wind: WindCondition): string {
 }
 
 export function windOnShotCopy(wind: WindCondition, ux: number, uz: number): string {
-  if (wind.mph <= 0) return "still";
+  if (wind.mph <= 0) return `from ${wind.from} · still`;
   const { alongMph, crossLeftMph, carryAdj } = projectWind(wind, ux, uz);
   const face =
     alongMph > 2.2 ? "downwind" : alongMph < -2.2 ? "into" : Math.abs(crossLeftMph) > 2.2 ? "across" : "quiet";

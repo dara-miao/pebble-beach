@@ -1,4 +1,4 @@
-import type { CourseData, HoleData, Vec2 } from "./types";
+import type { CourseData, HoleData, TeeSet, Vec2 } from "./types";
 
 export function dist(a: Vec2, b: Vec2): number {
   return Math.hypot(a[0] - b[0], a[1] - b[1]);
@@ -196,4 +196,56 @@ export function corridorPolygon(path: Vec2[], halfWidth: number): Vec2[] {
   const poly = [...left, ...right.reverse()];
   poly.push(poly[0]);
   return poly;
+}
+
+/** Dedupe tee centers that sit on top of each other. */
+function uniqueTeeCenters(hole: HoleData): Vec2[] {
+  const out: Vec2[] = [];
+  for (const t of hole.tees) {
+    const c = t.center;
+    if (!Array.isArray(c) || c.length < 2) continue;
+    if (out.some((p) => dist(p, c) < 8)) continue;
+    out.push(c);
+  }
+  return out;
+}
+
+/** Move along the hole path; positive yards is toward the green. */
+export function shiftAlongPath(hole: HoleData, from: Vec2, yardsTowardGreen: number): Vec2 {
+  const path = hole.path.length >= 2 ? hole.path : [hole.tee, hole.greenCenter];
+  const here = closestOnPath(path, from);
+  const len = pathLength(path);
+  const along = here.along + yardsTowardGreen;
+  if (along >= 0 && along <= len) return pointOnPath(path, along).point;
+  if (along < 0) {
+    const { point, dir } = pointOnPath(path, 0);
+    return [point[0] - dir[0] * -along, point[1] - dir[1] * -along];
+  }
+  const overshoot = along - len;
+  const { point, dir } = pointOnPath(path, len);
+  return [point[0] + dir[0] * overshoot, point[1] + dir[1] * overshoot];
+}
+
+/**
+ * Physical stance for a scorecard tee set. Blue stays on the official hole.tee;
+ * other sets shift along the path by the yardage gap vs Blue. When an OSM tee
+ * box sits near that spot, snap to it so the ball sits on the painted box.
+ */
+export function teeStance(hole: HoleData, tee: TeeSet): Vec2 {
+  const blueYards = hole.yards.blue ?? dist(hole.tee, hole.greenCenter);
+  const want = hole.yards[tee] ?? blueYards;
+  const delta = blueYards - want;
+  if (Math.abs(delta) < 1) return hole.tee;
+
+  const ideal = shiftAlongPath(hole, hole.tee, delta);
+  let best: Vec2 | null = null;
+  let bestD = 14;
+  for (const c of uniqueTeeCenters(hole)) {
+    const d = dist(c, ideal);
+    if (d < bestD) {
+      bestD = d;
+      best = c;
+    }
+  }
+  return best ?? ideal;
 }

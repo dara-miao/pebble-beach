@@ -1,5 +1,5 @@
 import type { HoleData, TeeSet } from "../course/types";
-import { closestOnPath } from "../course/geom";
+import { closestOnPath, teeStance } from "../course/geom";
 import type { Cover } from "../scene/cover";
 import { classifyLie, lieLabel, type Lie } from "./lie";
 import type { Club } from "./parse";
@@ -92,7 +92,7 @@ export function ballAt(x: number, z: number, hole: HoleData, coverAt: (x: number
 }
 
 export function createHolePlay(hole: HoleData, tee: TeeSet, coverAt: (x: number, z: number) => Cover): HolePlay {
-  const [x, z] = hole.tee;
+  const [x, z] = teeStance(hole, tee);
   const ball = ballAt(x, z, hole, coverAt);
   const scorecard = hole.yards[tee] ?? ball.pinYards;
   return {
@@ -167,6 +167,7 @@ export function leftoverCopy(play: HolePlay): string {
 }
 
 export function lieCopy(play: HolePlay): string {
+  if (play.strokes === 0 && !play.ball.holed) return "Tee";
   if (play.ball.lie === "ocean" && play.pendingDrop) {
     return `${lieLabel(play.ball.lie)} · drop next`;
   }

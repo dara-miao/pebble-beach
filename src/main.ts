@@ -213,7 +213,7 @@ function playView(): PlayHudView {
     pinYards: play.ball.pinYards,
     leftoverLabel: leftoverCopy(play),
     holed: play.ball.holed,
-    onTee: play.strokes === 0 && play.ball.lie === "tee",
+    onTee: play.strokes === 0 && !play.ball.holed,
     ball: [play.ball.x, play.ball.z],
     shots: play.shots,
     book,
@@ -338,19 +338,31 @@ function applyWind(next: Partial<WindCondition>) {
   const prev = holeWind();
   const wind = normalizeWind({ ...prev, ...next });
   winds.set(state.hole, wind);
-  if (draftPrompt.trim()) previewShot(draftPrompt);
+  const prompt = draftPrompt.trim() || defaultPrompt();
+  draftPrompt = prompt;
   refreshHud();
+  if (prompt) previewShot(prompt);
 }
 
 function applyHole(next: Partial<HudState>) {
   const holeChanged = next.hole != null && next.hole !== state.hole;
   const teeChanged = next.tee != null && next.tee !== state.tee;
+  const cameraOnly = next.camera != null && !holeChanged && !teeChanged && next.hole == null && next.tee == null;
   Object.assign(state, next);
   if (teeChanged) {
-    plays.set(state.hole, createPlay());
+    plays.clear();
+    round = { ...round, tee: state.tee };
     round = syncHoleScore(round, state.hole, 0, false);
-  }
-  if (holeChanged || teeChanged) {
+    adoptPlay(createPlay());
+    shotInfo = undefined;
+    aimTarget = null;
+    draftPrompt = "";
+    clearPreviewVisual(scene);
+    clearAimVisual(scene);
+    const old = scene.getObjectByName("shot-visual");
+    old?.parent?.remove(old);
+    draftPrompt = defaultPrompt();
+  } else if (holeChanged) {
     play = ensurePlay(state.hole);
     shotInfo = play.lastShot ? resultFromLast() : undefined;
     aimTarget = null;
@@ -362,12 +374,15 @@ function applyHole(next: Partial<HudState>) {
     draftPrompt = defaultPrompt();
   }
   const hole = activeHole();
-  markers.removeFromParent();
-  markers = addYardageMarkers(scene, hole, terrain.heightAt);
-  placeLieMarker(true);
+  if (!cameraOnly) {
+    markers.removeFromParent();
+    markers = addYardageMarkers(scene, hole, terrain.heightAt);
+    placeLieMarker(true);
+    fitShadow(hole);
+  }
   setCamera();
-  fitShadow(hole);
   refreshHud();
+  if ((teeChanged || holeChanged) && draftPrompt.trim()) previewShot(draftPrompt);
 }
 
 function composeRequest(prompt: string) {

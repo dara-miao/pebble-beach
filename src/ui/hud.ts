@@ -283,6 +283,10 @@ export function updateShotPanel(
   if (left) left.textContent = play.holed ? "Holed" : play.leftoverLabel.replace(" to pin", "");
   const book = el.querySelector(".book-list");
   if (book) book.innerHTML = bookListHtml(play, shot, play.cardYards);
+  const windLine = el.querySelector(".wind-on-shot");
+  if (windLine) windLine.textContent = play.windOnShot;
+  const windMph = el.querySelector(".wind-mph b");
+  if (windMph) windMph.textContent = play.wind.mph === 0 ? "Still" : `${play.wind.mph} mph`;
   const hint = el.querySelector(".hint");
   if (hint) hint.textContent = `Stand looks down the line · click to aim · miss envelope is the slight miss · ${play.suggestion.label} · r resets hole`;
 }

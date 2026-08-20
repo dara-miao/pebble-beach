@@ -64,3 +64,6 @@ export interface CourseData {
 
 export type TeeSet = "championship" | "blue" | "gold" | "white";
 export type CameraMode = "address" | "tee" | "flyover" | "green" | "overview";
+
+/** Back tees first — used when mapping scorecard sets onto physical boxes. */
+export const TEE_SETS: TeeSet[] = ["championship", "blue", "gold", "white"];
