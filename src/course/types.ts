@@ -37,6 +37,7 @@ export interface ElevationGrid {
   width: number;
   height: number;
   heightsYards: number[][];
+  source?: string;
 }
 
 export interface CourseData {

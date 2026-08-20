@@ -1,7 +1,17 @@
 import type { CourseData, HoleData, Vec2 } from "../course/types";
 import { greenPolygon, pointInPoly, polyBBox } from "../course/geom";
 
-export type Cover = "ocean" | "sand" | "rock" | "rough" | "woods" | "fairway" | "green" | "tee" | "bunker" | "path";
+export type Cover =
+  | "ocean"
+  | "sand"
+  | "rock"
+  | "rough"
+  | "woods"
+  | "fairway"
+  | "green"
+  | "tee"
+  | "bunker"
+  | "path";
 
 interface IndexedPoly {
   type: Cover;
@@ -23,6 +33,43 @@ const COLORS: Record<Cover, [number, number, number]> = {
   tee: [0.32, 0.62, 0.3],
   bunker: [0.86, 0.72, 0.46],
   path: [0.5, 0.46, 0.4],
+};
+
+/**
+ * Light game-art accents only. Real shape comes from USGS NED elevation.
+ * These amplify known hazards without inventing big fake hills.
+ */
+interface HoleAccent {
+  /** Soft tee pad so the box reads clearly. */
+  teePad?: number;
+  /** Soft green pad. */
+  greenPad?: number;
+  /** Barranca / ravine cut along path (fractional t). */
+  cut?: { t0: number; t1: number; depth: number; width: number };
+  /** Extra cliff drop on path left/right where DEM is already low. */
+  oceanSide?: "left" | "right";
+  oceanBoost?: number;
+}
+
+const ACCENTS: Record<number, HoleAccent> = {
+  1: { teePad: 1.2, greenPad: 1.0 },
+  2: { teePad: 1.0, greenPad: 1.2, cut: { t0: 0.78, t1: 0.92, depth: 5, width: 38 } },
+  3: { teePad: 1.0, greenPad: 1.2 },
+  4: { teePad: 1.2, greenPad: 1.4, oceanSide: "right", oceanBoost: 4 },
+  5: { teePad: 1.4, greenPad: 1.2, oceanSide: "right", oceanBoost: 5 },
+  6: { teePad: 1.2, greenPad: 1.6, oceanSide: "right", oceanBoost: 5 },
+  7: { teePad: 2.0, greenPad: 1.2, oceanSide: "right", oceanBoost: 6 },
+  8: { teePad: 1.2, greenPad: 1.6, cut: { t0: 0.45, t1: 0.75, depth: 10, width: 48 } },
+  9: { teePad: 1.2, greenPad: 1.2, oceanSide: "right", oceanBoost: 6 },
+  10: { teePad: 1.2, greenPad: 1.2, oceanSide: "right", oceanBoost: 6 },
+  11: { teePad: 1.0, greenPad: 1.4 },
+  12: { teePad: 1.0, greenPad: 1.5 },
+  13: { teePad: 1.0, greenPad: 1.6 },
+  14: { teePad: 1.0, greenPad: 2.0 },
+  15: { teePad: 1.0, greenPad: 1.2 },
+  16: { teePad: 1.0, greenPad: 1.2, oceanBoost: 3 },
+  17: { teePad: 1.4, greenPad: 1.3, oceanBoost: 5 },
+  18: { teePad: 1.0, greenPad: 1.5, oceanSide: "left", oceanBoost: 6 },
 };
 
 function add(index: IndexedPoly[], type: Cover, poly: Vec2[]) {
@@ -80,27 +127,30 @@ export function sampleElevation(course: CourseData, x: number, z: number): numbe
   const h10 = e.heightsYards[z0][x0 + 1];
   const h01 = e.heightsYards[z0 + 1][x0];
   const h11 = e.heightsYards[z0 + 1][x0 + 1];
-  const h = h00 * (1 - tx) * (1 - tz) + h10 * tx * (1 - tz) + h01 * (1 - tx) * tz + h11 * tx * tz;
-  return Math.min(58, h);
+  return h00 * (1 - tx) * (1 - tz) + h10 * tx * (1 - tz) + h01 * (1 - tx) * tz + h11 * tx * tz;
 }
 
 function softBump(d: number, radius: number, height: number): number {
-  if (d >= radius) return 0;
+  if (d >= radius || radius <= 0) return 0;
   const t = 1 - d / radius;
   return height * t * t * (3 - 2 * t);
 }
 
-function pathFrame(hole: HoleData): { along: (p: Vec2) => number; side: (p: Vec2) => number; len: number } {
+function pathFrame(hole: HoleData): {
+  along: (p: Vec2) => number;
+  side: (p: Vec2) => number;
+  dist: (p: Vec2) => number;
+  len: number;
+} {
   const path = hole.path.length >= 2 ? hole.path : [hole.tee, hole.greenCenter];
   let len = 0;
-  const segs: { a: Vec2; b: Vec2; start: number; segLen: number; ux: number; uz: number }[] = [];
+  const segs: { a: Vec2; start: number; segLen: number; ux: number; uz: number }[] = [];
   for (let i = 0; i < path.length - 1; i++) {
     const a = path[i];
     const b = path[i + 1];
     const segLen = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1e-6;
     segs.push({
       a,
-      b,
       start: len,
       segLen,
       ux: (b[0] - a[0]) / segLen,
@@ -109,116 +159,115 @@ function pathFrame(hole: HoleData): { along: (p: Vec2) => number; side: (p: Vec2
     len += segLen;
   }
 
+  const query = (p: Vec2) => {
+    let bestAlong = 0;
+    let bestSide = 0;
+    let bestD = 1e9;
+    for (const s of segs) {
+      const vx = p[0] - s.a[0];
+      const vz = p[1] - s.a[1];
+      const alongT = Math.max(0, Math.min(1, vx * s.ux + vz * s.uz));
+      const qx = s.a[0] + alongT * s.ux * s.segLen;
+      const qz = s.a[1] + alongT * s.uz * s.segLen;
+      const d = Math.hypot(p[0] - qx, p[1] - qz);
+      const signed = (p[0] - qx) * s.uz - (p[1] - qz) * s.ux;
+      if (d < bestD) {
+        bestD = d;
+        bestAlong = s.start + alongT * s.segLen;
+        bestSide = signed;
+      }
+    }
+    return { along: bestAlong, side: bestSide, dist: bestD };
+  };
+
   return {
     len,
-    along: (p) => {
-      let best = 0;
-      let bestD = 1e9;
-      for (const s of segs) {
-        const vx = p[0] - s.a[0];
-        const vz = p[1] - s.a[1];
-        const t = Math.max(0, Math.min(1, vx * s.ux + vz * s.uz));
-        const qx = s.a[0] + t * s.ux * s.segLen;
-        const qz = s.a[1] + t * s.uz * s.segLen;
-        const d = Math.hypot(p[0] - qx, p[1] - qz);
-        if (d < bestD) {
-          bestD = d;
-          best = s.start + t * s.segLen;
-        }
-      }
-      return best;
-    },
-    side: (p) => {
-      let best = 0;
-      let bestD = 1e9;
-      for (const s of segs) {
-        const vx = p[0] - s.a[0];
-        const vz = p[1] - s.a[1];
-        const t = Math.max(0, Math.min(1, (vx * s.ux + vz * s.uz) / 1));
-        const alongT = Math.max(0, Math.min(1, vx * s.ux + vz * s.uz));
-        const qx = s.a[0] + alongT * s.ux * s.segLen;
-        const qz = s.a[1] + alongT * s.uz * s.segLen;
-        const d = Math.hypot(p[0] - qx, p[1] - qz);
-        // left = (uz, -ux) in xz for forward (ux, uz)
-        const signed = (p[0] - qx) * s.uz - (p[1] - qz) * s.ux;
-        if (d < bestD) {
-          bestD = d;
-          best = signed;
-        }
-        void t;
-      }
-      return best;
-    },
+    along: (p) => query(p).along,
+    side: (p) => query(p).side,
+    dist: (p) => query(p).dist,
   };
 }
 
-/** Artistic sculpting so 7 / 8 / 18 read like the famous holes in a game art style. */
-function sculptSignature(course: CourseData, x: number, z: number, base: number): number {
+function accentHole(hole: HoleData, accent: HoleAccent, x: number, z: number, demY: number): number {
+  let dy = 0;
+  const frame = pathFrame(hole);
+  const p: Vec2 = [x, z];
+  const along = frame.along(p);
+  const side = frame.side(p);
+  const pathDist = frame.dist(p);
+  const t = frame.len > 0 ? along / frame.len : 0;
+
+  if (accent.teePad) {
+    dy += softBump(Math.hypot(x - hole.tee[0], z - hole.tee[1]), 28, accent.teePad);
+  }
+  if (accent.greenPad) {
+    dy += softBump(Math.hypot(x - hole.greenCenter[0], z - hole.greenCenter[1]), 26, accent.greenPad);
+  }
+
+  if (accent.cut && pathDist < accent.cut.width && t > accent.cut.t0 && t < accent.cut.t1) {
+    const mid = (accent.cut.t0 + accent.cut.t1) / 2;
+    const half = (accent.cut.t1 - accent.cut.t0) / 2 || 0.01;
+    const alongFactor = 1 - Math.abs(t - mid) / half;
+    const across = 1 - Math.abs(side) / accent.cut.width;
+    dy -= accent.cut.depth * Math.max(0, alongFactor) * Math.max(0, across);
+  }
+
+  // Only deepen ocean edges where DEM is already low (near sea level).
+  if (accent.oceanSide && accent.oceanBoost && demY < 12 && pathDist < 90) {
+    const start = 16;
+    const seaward = accent.oceanSide === "left" ? side > start : side < -start;
+    const edgeDist = accent.oceanSide === "left" ? side - start : -side - start;
+    if (seaward && edgeDist > 0) {
+      const edge = Math.min(1, edgeDist / 28);
+      const low = Math.max(0, 1 - demY / 12);
+      dy -= accent.oceanBoost * edge * edge * low;
+    }
+  }
+
+  // Ocean long of 16/17: drop only if DEM is already coastal-low past green.
+  if (accent.oceanBoost && !accent.oceanSide && demY < 10) {
+    const g = hole.greenCenter;
+    const tee = hole.tee;
+    const dx = g[0] - tee[0];
+    const dz = g[1] - tee[1];
+    const len = Math.hypot(dx, dz) || 1;
+    const ux = dx / len;
+    const uz = dz / len;
+    const ahead = (x - g[0]) * ux + (z - g[1]) * uz;
+    const lateral = Math.abs((x - g[0]) * uz - (z - g[1]) * ux);
+    if (ahead > 8 && ahead < 55 && lateral < 45) {
+      dy -= accent.oceanBoost * Math.min(1, (ahead - 8) / 25) * (1 - demY / 10);
+    }
+  }
+
+  return dy;
+}
+
+/** DEM-first height with light per-hole accents. */
+function sculptTerrain(course: CourseData, x: number, z: number, base: number): number {
   let y = base;
-  const h7 = course.holes[6];
-  const h8 = course.holes[7];
-  const h18 = course.holes[17];
-  if (!h7 || !h8 || !h18) return y;
+  const p: Vec2 = [x, z];
 
-  // Hole 7 — high tee knoll, green perched just above the rocks, ocean beyond.
-  {
-    const tee = h7.tee;
-    const green = h7.greenCenter;
-    const dTee = Math.hypot(x - tee[0], z - tee[1]);
-    const dGreen = Math.hypot(x - green[0], z - green[1]);
-    y += softBump(dTee, 55, 16);
-    y += softBump(dGreen, 32, 2.5);
-    // Drop toward ocean south of the green.
-    const southOfGreen = z - green[1];
-    if (southOfGreen > 8 && Math.abs(x - green[0]) < 70) {
-      const drop = Math.min(22, (southOfGreen - 8) * 0.55);
-      y -= drop;
-    }
-    // Cliff band around the green tip.
-    if (dGreen > 18 && dGreen < 55 && southOfGreen > -5) {
-      y -= softBump(Math.abs(dGreen - 36), 18, 8);
-    }
+  let best: { hole: HoleData; accent: HoleAccent; dist: number } | null = null;
+  for (const hole of course.holes) {
+    const accent = ACCENTS[hole.number];
+    if (!accent) continue;
+    const frame = pathFrame(hole);
+    const d = Math.min(
+      frame.dist(p),
+      Math.hypot(x - hole.tee[0], z - hole.tee[1]) * 0.9,
+      Math.hypot(x - hole.greenCenter[0], z - hole.greenCenter[1]) * 0.9,
+    );
+    if (!best || d < best.dist) best = { hole, accent, dist: d };
   }
 
-  // Hole 8 — ravine / chasm on the approach to the green.
-  {
-    const frame = pathFrame(h8);
-    const along = frame.along([x, z]);
-    const side = frame.side([x, z]);
-    const t = frame.len > 0 ? along / frame.len : 0;
-    // Chasm sits in the last third, crossing the line of play.
-    if (t > 0.42 && t < 0.78 && Math.abs(side) < 55) {
-      const mid = 1 - Math.abs((t - 0.6) / 0.18);
-      const across = 1 - Math.abs(side) / 55;
-      const depth = 22 * Math.max(0, mid) * Math.max(0, across);
-      y -= depth;
-    }
-    // Green headland bump.
-    y += softBump(Math.hypot(x - h8.greenCenter[0], z - h8.greenCenter[1]), 40, 5);
-    // Tee shelf near 7 green.
-    y += softBump(Math.hypot(x - h8.tee[0], z - h8.tee[1]), 35, 3);
+  if (best && best.dist < 120) {
+    y += accentHole(best.hole, best.accent, x, z, base);
   }
 
-  // Hole 18 — ocean cliff on the left (seaward), gentle rise into the Lodge green.
-  {
-    const frame = pathFrame(h18);
-    const along = frame.along([x, z]);
-    const side = frame.side([x, z]);
-    const t = frame.len > 0 ? along / frame.len : 0;
-    if (t > -0.05 && t < 1.05 && Math.abs(side) < 120) {
-      // Seaward side drops hard (signed side > 0 ≈ left of play for this routing).
-      if (side > 18) {
-        const edge = Math.min(1, (side - 18) / 35);
-        y -= 18 * edge * edge;
-      }
-      // Fairway shelf stays playable.
-      if (Math.abs(side) < 22) {
-        y = Math.max(y, 4.5 + t * 2.5);
-      }
-    }
-    y += softBump(Math.hypot(x - h18.greenCenter[0], z - h18.greenCenter[1]), 45, 4);
-    y += softBump(Math.hypot(x - h18.tee[0], z - h18.tee[1]), 40, 2);
-  }
+  // Mild readability boost: exaggerate DEM relief a touch without inventing shape.
+  const mean = 12;
+  y = mean + (y - mean) * 1.15;
 
   return y;
 }
@@ -230,20 +279,21 @@ export function heightAt(
   z: number,
 ): { y: number; cover: Cover } {
   const cover = coverAt(x, z, index);
-  let y = sculptSignature(course, x, z, sampleElevation(course, x, z));
+  const dem = sampleElevation(course, x, z);
+  let y = sculptTerrain(course, x, z, dem);
 
   if (cover === "ocean") {
     return { y: -1.2, cover };
   }
   if (!cover) {
-    if (y < 2.2) return { y: -1.5, cover: "ocean" };
-    return { y, cover: y < 7 ? "rock" : "rough" };
+    if (y < 1.8 || dem < 1.2) return { y: -1.5, cover: "ocean" };
+    return { y, cover: y < 6 ? "rock" : "rough" };
   }
-  if (cover === "bunker") y -= 1.15;
+  if (cover === "bunker") y -= 1.0;
   if (cover === "green" || cover === "tee") {
-    y = Math.max(y, 3.5);
+    y = Math.max(y, dem + 0.4);
   } else {
-    y = Math.max(y, 2.2);
+    y = Math.max(y, Math.min(dem, 2.0));
   }
   return { y, cover };
 }
