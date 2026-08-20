@@ -1,22 +1,16 @@
 import "./style.css";
 import * as THREE from "three";
 import type { HoleData } from "./course/types";
-import { defaultFairwayTarget, holeByNumber, OPENING_HOLE } from "./course/geom";
+import { defaultFairwayTarget } from "./course/geom";
 import { loadCourse } from "./course/load";
 import { createTerrain } from "./scene/terrain";
 import { createOcean, createSky, sunFromTime } from "./scene/atmosphere";
 import { addCourseFeatures, addYardageMarkers } from "./scene/features";
 import { addTrees } from "./scene/trees";
 import { createCourseCamera } from "./camera/courseCamera";
-import { renderHud, updateShotPanel, type HudState, type PlayHudView, type ShotHudInfo } from "./ui/hud";
-import { describeShot, parseShotPrompt, promptSpecifiesAim } from "./shot/parse";
-import { simulateMissEnvelope } from "./shot/miss";
-import { resolveAim } from "./shot/simulate";
-import { applyShotResult, createHolePlay, leftoverCopy, lieCopy, resolveOrigin, scoreCopy, type HolePlay } from "./shot/play";
-import { createRound, resetRound, roundThru, syncHoleScore, type RoundCard } from "./shot/round";
-import { DEFAULT_WIND, normalizeWind, windOnShotCopy, type WindCondition } from "./shot/wind";
-import { lieLabel } from "./shot/lie";
-import { bookFromHere, suggestShot } from "./shot/yardage";
+import { renderHud, updateShotPanel } from "./ui/hud";
+import { resolveOrigin } from "./shot/play";
+import { createPlaySession } from "./shot/session";
 import { clearAimVisual, clearPreviewVisual, playShotVisual, showPreviewVisual, upsertAimVisual, upsertLieMarker, type ShotVisual } from "./shot/visual";
 
 const course = loadCourse();
@@ -86,41 +80,27 @@ function pickGround(clientX: number, clientY: number): { x: number; z: number } 
   return { x: hits[0].point.x, z: hits[0].point.z };
 }
 
-function setAimFromGround(point: { x: number; z: number }, live: boolean) {
-  if (play.ball.holed) return;
-  const hole = activeHole();
-  const { origin } = resolveOrigin(play, hole, terrain.coverAt);
-  if (Math.hypot(point.x - origin.x, point.z - origin.z) < 4) return;
-  const pinDist = Math.hypot(point.x - hole.pin[0], point.z - hole.pin[1]);
-  aimTarget = pinDist < 8 ? { x: hole.pin[0], z: hole.pin[1] } : point;
-  const targetYards = Math.hypot(aimTarget.x - origin.x, aimTarget.z - origin.z);
-  const next = suggestShot(origin.lie, origin.remainingYards, origin.pinYards, targetYards).prompt;
-  if (!draftPrompt.trim() || draftPrompt === defaultPromptFrom(origin, undefined) || !promptSpecifiesAim(draftPrompt)) {
-    if (!promptSpecifiesAim(draftPrompt)) draftPrompt = next;
-  }
-  placeAimMarker(origin);
-  if (state.camera === "address") setCamera();
-  if (live) {
-    if (!draftPrompt.trim()) draftPrompt = next;
-    previewShot(draftPrompt);
-    const input = hudEl.querySelector<HTMLInputElement>("input[name=prompt]");
-    if (input && document.activeElement !== input) input.value = draftPrompt;
-    updateShotPanel(hudEl, playView(), hole, shotInfo);
-  }
-}
+const session = createPlaySession(course, terrain.coverAt, terrain.heightAt);
 
-function defaultPromptFrom(
-  origin: { lie: import("./shot/lie").Lie; remainingYards: number; pinYards: number },
-  targetYards?: number,
-) {
-  return suggestShot(origin.lie, origin.remainingYards, origin.pinYards, targetYards).prompt;
+function setAimFromGround(point: { x: number; z: number }, live: boolean) {
+  const aimed = session.setAimFromGround(point);
+  if (!aimed) return;
+  const { origin } = resolveOrigin(session.play, session.holeData, terrain.coverAt);
+  placeAimMarker(origin);
+  if (session.state.camera === "address") setCamera();
+  if (live) {
+    const input = hudEl.querySelector<HTMLInputElement>("input[name=prompt]");
+    if (input && document.activeElement !== input) input.value = session.draftPrompt;
+    if (session.lastSim) showPreviewVisual(scene, session.lastSim.result, session.lastSim.envelope, terrain.heightAt);
+    updateShotPanel(hudEl, session.playView(), session.holeData, session.shotInfo);
+  }
 }
 
 canvas.addEventListener("pointerdown", (event) => {
   if (event.button !== 0) return;
   pointerStart = { x: event.clientX, y: event.clientY };
   const hit = pickGround(event.clientX, event.clientY);
-  if (hit && aimTarget && Math.hypot(hit.x - aimTarget.x, hit.z - aimTarget.z) < 12) {
+  if (hit && session.aimTarget && Math.hypot(hit.x - session.aimTarget.x, hit.z - session.aimTarget.z) < 12) {
     aimDrag = true;
     cam.controls.enabled = false;
   } else if (event.shiftKey && hit) {
@@ -155,177 +135,80 @@ canvas.addEventListener("pointerup", (event) => {
 const cam = createCourseCamera(canvas);
 let markers = new THREE.Group();
 let activeShot: ShotVisual | null = null;
-let shotInfo: ShotHudInfo | undefined;
-let draftPrompt = "";
 let previewTimer = 0;
 
-const state: HudState = { hole: OPENING_HOLE, tee: "blue", camera: "address" };
-const plays = new Map<number, HolePlay>();
-const winds = new Map<number, WindCondition>();
-let round: RoundCard = createRound(course, state.tee);
-let play = createPlay();
-plays.set(state.hole, play);
-let aimTarget: { x: number; z: number } | null = null;
-
-function activeHole(): HoleData {
-  return holeByNumber(course, state.hole);
-}
-
-function createPlay(): HolePlay {
-  return createHolePlay(activeHole(), state.tee, terrain.coverAt);
-}
-
-function holeWind(): WindCondition {
-  return winds.get(state.hole) ?? DEFAULT_WIND;
-}
-
-function adoptPlay(next: HolePlay) {
-  play = next;
-  plays.set(state.hole, next);
-  round = syncHoleScore(round, next.holeNumber, next.strokes, next.ball.holed);
-}
-
-function ensurePlay(holeNumber: number): HolePlay {
-  const existing = plays.get(holeNumber);
-  if (existing && existing.tee === state.tee) return existing;
-  const next = createHolePlay(holeByNumber(course, holeNumber), state.tee, terrain.coverAt);
-  plays.set(holeNumber, next);
-  return next;
-}
-
-function playView(): PlayHudView {
-  const hole = activeHole();
-  const { origin } = resolveOrigin(play, hole, terrain.coverAt);
-  const aim = currentAim(origin, hole);
-  const targetYards = aimTarget ? Math.hypot(aimTarget.x - origin.x, aimTarget.z - origin.z) : undefined;
-  const planned = shotInfo?.carry;
-  const book = bookFromHere(origin, hole, aim, terrain.coverAt, planned, targetYards);
-  const suggestion = play.ball.holed
-    ? { label: "holed out", prompt: "" }
-    : book.suggest;
-  return {
-    strokes: play.strokes,
-    penalties: play.penalties,
-    scoreLabel: scoreCopy(play),
-    lie: play.ball.lie,
-    lieLabel: lieCopy(play),
-    remainingYards: play.ball.remainingYards,
-    pinYards: play.ball.pinYards,
-    leftoverLabel: leftoverCopy(play),
-    holed: play.ball.holed,
-    onTee: play.strokes === 0 && !play.ball.holed,
-    ball: [play.ball.x, play.ball.z],
-    shots: play.shots,
-    book,
-    suggestion,
-    cardYards: hole.yards[state.tee] ?? hole.yards.blue,
-    wind: holeWind(),
-    windOnShot: windOnShotCopy(holeWind(), aim.ux, aim.uz),
-    round,
-    thru: roundThru(round),
-  };
-}
-
-function implicitTarget(origin: { x: number; z: number }, hole: ReturnType<typeof activeHole>, carryYards?: number) {
-  return aimTarget ?? defaultFairwayTarget(hole, origin, carryYards);
-}
-
-function currentAim(origin: { x: number; z: number }, hole: ReturnType<typeof activeHole>) {
-  return resolveAim(hole, origin, {
-    aimYardsLeft: 0,
-    landYards: undefined,
-    target: implicitTarget(origin, hole),
-  });
-}
-
 function lookAtPoint(): [number, number] {
-  if (aimTarget) return [aimTarget.x, aimTarget.z];
-  const hole = activeHole();
-  const { origin } = resolveOrigin(play, hole, terrain.coverAt);
+  if (session.aimTarget) return [session.aimTarget.x, session.aimTarget.z];
+  const hole = session.holeData;
+  const { origin } = resolveOrigin(session.play, hole, terrain.coverAt);
   const target = defaultFairwayTarget(hole, origin);
   return [target.x, target.z];
 }
 
-function setCamera(mode = state.camera) {
-  cam.setMode(mode, activeHole(), terrain.heightAt, ballSample(), lookAtPoint());
+function setCamera(mode = session.state.camera) {
+  cam.setMode(mode, session.holeData, terrain.heightAt, ballSample(), lookAtPoint());
 }
 
 function ballSample(): [number, number] {
-  const { origin } = resolveOrigin(play, activeHole(), terrain.coverAt);
+  const { origin } = resolveOrigin(session.play, session.holeData, terrain.coverAt);
   return [origin.x, origin.z];
 }
 
 function placeLieMarker(visible = true) {
-  const hole = activeHole();
-  const { origin } = resolveOrigin(play, hole, terrain.coverAt);
+  const hole = session.holeData;
+  const { origin } = resolveOrigin(session.play, hole, terrain.coverAt);
   const y = terrain.heightAt(origin.x, origin.z);
   upsertLieMarker(scene, origin.x, y, origin.z, origin.lie, visible);
   placeAimMarker(origin);
 }
 
 function placeAimMarker(origin?: { x: number; z: number }) {
-  if (!aimTarget) {
+  if (!session.aimTarget) {
     clearAimVisual(scene);
     return;
   }
-  const from = origin ?? resolveOrigin(play, activeHole(), terrain.coverAt).origin;
+  const from = origin ?? resolveOrigin(session.play, session.holeData, terrain.coverAt).origin;
   upsertAimVisual(
     scene,
     { x: from.x, y: terrain.heightAt(from.x, from.z), z: from.z },
-    { x: aimTarget.x, y: terrain.heightAt(aimTarget.x, aimTarget.z), z: aimTarget.z },
+    { x: session.aimTarget.x, y: terrain.heightAt(session.aimTarget.x, session.aimTarget.z), z: session.aimTarget.z },
     terrain.heightAt,
     true,
   );
-}
-
-function defaultPrompt(): string {
-  if (play.ball.holed) return "";
-  const hole = activeHole();
-  const { origin } = resolveOrigin(play, hole, terrain.coverAt);
-  const targetYards = aimTarget ? Math.hypot(aimTarget.x - origin.x, aimTarget.z - origin.z) : undefined;
-  return suggestShot(origin.lie, origin.remainingYards, origin.pinYards, targetYards).prompt;
 }
 
 function refreshHud() {
   renderHud(
     hudEl,
     course,
-    activeHole(),
-    state,
-    playView(),
+    session.holeData,
+    session.state,
+    session.playView(),
     { onChange: applyHole, onShot: fireShot, onPreview: queuePreview, onReset: resetHole, onWind: applyWind, onNewRound: newRound },
-    shotInfo,
-    draftPrompt,
+    session.shotInfo,
+    session.draftPrompt,
   );
 }
 
-function resetHole() {
-  adoptPlay(createPlay());
-  shotInfo = undefined;
-  aimTarget = null;
-  draftPrompt = defaultPrompt();
+function clearShotVisuals() {
   clearPreviewVisual(scene);
   clearAimVisual(scene);
   const old = scene.getObjectByName("shot-visual");
   old?.parent?.remove(old);
+}
+
+function resetHole() {
+  session.resetHole();
+  clearShotVisuals();
   placeLieMarker(true);
   setCamera();
   refreshHud();
 }
 
 function newRound() {
-  plays.clear();
-  round = resetRound(round);
-  state.hole = OPENING_HOLE;
-  adoptPlay(createPlay());
-  shotInfo = undefined;
-  aimTarget = null;
-  draftPrompt = defaultPrompt();
-  clearPreviewVisual(scene);
-  clearAimVisual(scene);
-  const old = scene.getObjectByName("shot-visual");
-  old?.parent?.remove(old);
-  const hole = activeHole();
+  session.newRound();
+  clearShotVisuals();
+  const hole = session.holeData;
   markers.removeFromParent();
   markers = addYardageMarkers(scene, hole, terrain.heightAt);
   placeLieMarker(true);
@@ -334,46 +217,18 @@ function newRound() {
   refreshHud();
 }
 
-function applyWind(next: Partial<WindCondition>) {
-  const prev = holeWind();
-  const wind = normalizeWind({ ...prev, ...next });
-  winds.set(state.hole, wind);
-  const prompt = draftPrompt.trim() || defaultPrompt();
-  draftPrompt = prompt;
+function applyWind(next: Parameters<typeof session.applyWind>[0]) {
+  session.applyWind(next);
   refreshHud();
-  if (prompt) previewShot(prompt);
+  if (session.lastSim) showPreviewVisual(scene, session.lastSim.result, session.lastSim.envelope, terrain.heightAt);
+  else clearPreviewVisual(scene);
 }
 
-function applyHole(next: Partial<HudState>) {
-  const holeChanged = next.hole != null && next.hole !== state.hole;
-  const teeChanged = next.tee != null && next.tee !== state.tee;
-  const cameraOnly = next.camera != null && !holeChanged && !teeChanged && next.hole == null && next.tee == null;
-  Object.assign(state, next);
-  if (teeChanged) {
-    plays.clear();
-    round = { ...round, tee: state.tee };
-    round = syncHoleScore(round, state.hole, 0, false);
-    adoptPlay(createPlay());
-    shotInfo = undefined;
-    aimTarget = null;
-    draftPrompt = "";
-    clearPreviewVisual(scene);
-    clearAimVisual(scene);
-    const old = scene.getObjectByName("shot-visual");
-    old?.parent?.remove(old);
-    draftPrompt = defaultPrompt();
-  } else if (holeChanged) {
-    play = ensurePlay(state.hole);
-    shotInfo = play.lastShot ? resultFromLast() : undefined;
-    aimTarget = null;
-    draftPrompt = "";
-    clearPreviewVisual(scene);
-    clearAimVisual(scene);
-    const old = scene.getObjectByName("shot-visual");
-    old?.parent?.remove(old);
-    draftPrompt = defaultPrompt();
-  }
-  const hole = activeHole();
+function applyHole(next: Parameters<typeof session.applyChange>[0]) {
+  const change = session.applyChange(next);
+  const cameraOnly = change.cameraChanged && !change.holeChanged && !change.teeChanged && next.hole == null && next.tee == null;
+  if (change.holeChanged || change.teeChanged) clearShotVisuals();
+  const hole = session.holeData;
   if (!cameraOnly) {
     markers.removeFromParent();
     markers = addYardageMarkers(scene, hole, terrain.heightAt);
@@ -382,129 +237,36 @@ function applyHole(next: Partial<HudState>) {
   }
   setCamera();
   refreshHud();
-  if ((teeChanged || holeChanged) && draftPrompt.trim()) previewShot(draftPrompt);
-}
-
-function composeRequest(prompt: string) {
-  const req = parseShotPrompt(prompt);
-  if (promptSpecifiesAim(prompt) && !aimTarget) return req;
-  const hole = activeHole();
-  const { origin } = resolveOrigin(play, hole, terrain.coverAt);
-  const target = implicitTarget(origin, hole, req.carryYards);
-  req.target = { x: target.x, z: target.z };
-  const aimed = resolveAim(hole, origin, { aimYardsLeft: 0, target: req.target });
-  req.aimYardsLeft = Math.round(aimed.leftYards);
-  req.landYards = Math.round(Math.hypot(target.x - origin.x, target.z - origin.z));
-  return req;
-}
-
-function simulateFromPrompt(prompt: string) {
-  const hole = activeHole();
-  const req = composeRequest(prompt);
-  const { origin, dropped } = resolveOrigin(play, hole, terrain.coverAt);
-  const wind = holeWind();
-  const envelope = simulateMissEnvelope(hole, req, terrain.heightAt, terrain.coverAt, origin, dropped, wind);
-  const result = envelope.called;
-  const info: ShotHudInfo = {
-    summary: describeShot(req, lieLabel(origin.lie).toLowerCase(), wind.mph > 0 ? playViewWind(origin, hole, wind) : undefined),
-    outcome: result.outcome,
-    carry: result.carryYards,
-    total: result.totalYards,
-    peak: result.peakYards,
-    leftover: Math.round(result.remainingYards),
-    leftoverLabel: result.leftoverLabel === "Holed" ? "Holed" : result.leftoverLabel.replace(" to pin", ""),
-    landLie: lieLabel(result.landLie),
-    roll: result.rollYards,
-    trouble: result.trouble.ocean
-      ? "ocean"
-      : result.trouble.bunker
-        ? "bunker"
-        : result.trouble.woods
-          ? "woods"
-          : result.trouble.shortSided
-            ? "short"
-            : undefined,
-    land: [result.end.x, result.end.z],
-    target: aimTarget ? [aimTarget.x, aimTarget.z] : [result.aim.target.x, result.aim.target.z],
-    plannedCarry: result.carryYards,
-    miss: envelope.copy,
-    missDanger: !envelope.safe,
-    missLandings: envelope.samples.map((s) => [s.x, s.z] as [number, number]),
-  };
-  return { req, result, info, origin, envelope };
-}
-
-function playViewWind(origin: { x: number; z: number }, hole: ReturnType<typeof activeHole>, wind: WindCondition) {
-  const aim = currentAim(origin, hole);
-  return windOnShotCopy(wind, aim.ux, aim.uz);
+  if ((change.holeChanged || change.teeChanged) && session.lastSim) {
+    showPreviewVisual(scene, session.lastSim.result, session.lastSim.envelope, terrain.heightAt);
+  }
 }
 
 function queuePreview(prompt: string) {
-  draftPrompt = prompt;
+  session.draftPrompt = prompt;
   window.clearTimeout(previewTimer);
   previewTimer = window.setTimeout(() => previewShot(prompt), 160);
 }
 
 function previewShot(prompt: string) {
-  if (play.ball.holed) return;
-  const trimmed = prompt.trim();
-  if (!trimmed) {
-    if (shotInfo?.kind === "preview") shotInfo = play.lastShot ? resultFromLast() : undefined;
+  session.previewShot(prompt);
+  if (!prompt.trim() || !session.lastSim) {
     clearPreviewVisual(scene);
-    updateShotPanel(hudEl, playView(), activeHole(), shotInfo);
+    updateShotPanel(hudEl, session.playView(), session.holeData, session.shotInfo);
     return;
   }
-  const { result, info, envelope } = simulateFromPrompt(trimmed);
-  shotInfo = { ...info, kind: "preview" };
-  showPreviewVisual(scene, result, envelope, terrain.heightAt);
-  updateShotPanel(hudEl, playView(), activeHole(), shotInfo);
-}
-
-function resultFromLast(): ShotHudInfo | undefined {
-  const last = play.lastShot;
-  if (!last) return undefined;
-  return {
-    summary: leftoverCopy(play),
-    outcome: last.outcome,
-    carry: last.carryYards,
-    total: last.totalYards,
-    peak: last.peakYards,
-    leftover: Math.round(last.remainingYards),
-    leftoverLabel: last.leftoverLabel === "Holed" ? "Holed" : last.leftoverLabel.replace(" to pin", ""),
-    landLie: lieLabel(last.landLie),
-    roll: last.rollYards,
-    trouble: last.trouble.ocean
-      ? "ocean"
-      : last.trouble.bunker
-        ? "bunker"
-        : last.trouble.woods
-          ? "woods"
-          : last.trouble.shortSided
-            ? "short"
-            : undefined,
-    land: [last.end.x, last.end.z],
-    target: [last.aim.target.x, last.aim.target.z],
-    plannedCarry: last.carryYards,
-    kind: "result",
-  };
+  showPreviewVisual(scene, session.lastSim.result, session.lastSim.envelope, terrain.heightAt);
+  updateShotPanel(hudEl, session.playView(), session.holeData, session.shotInfo);
 }
 
 function fireShot(prompt: string) {
-  if (play.ball.holed) return;
-  const trimmed = prompt.trim();
-  if (!trimmed) return;
-  draftPrompt = trimmed;
-  const hole = activeHole();
-  const { result, info } = simulateFromPrompt(trimmed);
-  adoptPlay(applyShotResult(play, result, hole, terrain.coverAt));
-  shotInfo = { ...info, kind: "result", miss: undefined, missDanger: undefined, missLandings: undefined };
-  aimTarget = null;
-  draftPrompt = defaultPrompt();
+  const sim = session.fireShot(prompt);
+  if (!sim) return;
   placeLieMarker(false);
-  activeShot = playShotVisual(scene, result, Math.max(2.6, Math.min(4.2, result.totalYards / 80)));
+  activeShot = playShotVisual(scene, sim.result, Math.max(2.6, Math.min(4.2, sim.result.totalYards / 80)));
   cam.followShot(
-    result.points.map((p) => p.position),
-    Math.max(2.8, Math.min(4.5, result.totalYards / 75)),
+    sim.result.points.map((p) => p.position),
+    Math.max(2.8, Math.min(4.5, sim.result.totalYards / 75)),
   );
   refreshHud();
 }
@@ -537,7 +299,7 @@ function tick() {
     if (done) {
       activeShot = null;
       placeLieMarker(true);
-      if (state.camera === "address" || state.camera === "tee") setCamera();
+      if (session.state.camera === "address" || session.state.camera === "tee") setCamera();
     }
   }
   const waterUniforms = (ocean.material as THREE.ShaderMaterial).uniforms;
@@ -546,15 +308,14 @@ function tick() {
   requestAnimationFrame(tick);
 }
 
-draftPrompt = defaultPrompt();
 applyHole({});
 tick();
 
 window.addEventListener("keydown", (e) => {
   const tag = (e.target as HTMLElement | null)?.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA") return;
-  if (e.key === "ArrowRight") applyHole({ hole: (state.hole % 18) + 1 });
-  if (e.key === "ArrowLeft") applyHole({ hole: state.hole === 1 ? 18 : state.hole - 1 });
+  if (e.key === "ArrowRight") applyHole({ hole: (session.state.hole % 18) + 1 });
+  if (e.key === "ArrowLeft") applyHole({ hole: session.state.hole === 1 ? 18 : session.state.hole - 1 });
   if (e.key === "a") applyHole({ camera: "address" });
   if (e.key === "t") applyHole({ camera: "tee" });
   if (e.key === "f") applyHole({ camera: "flyover" });

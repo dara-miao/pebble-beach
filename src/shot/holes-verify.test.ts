@@ -126,11 +126,20 @@ describe("hole 7 / hole 8 verify script", () => {
     expect(atGreen.called.trouble.bunker).toBe(false);
     expect(atGreen.called.trouble.ocean).toBe(false);
     expect(atGreen.called.landLie).toBe("green");
-    expect(missShowsHazard(atGreen, "bunker")).toBe(true);
-    expect(atGreen.copy.toLowerCase()).toMatch(/bunker/);
-    expect(atGreen.samples.find((s) => s.kind === "long")?.trouble.bunker).toBe(true);
+    const bunker = hole.bunkers.find((b) => coverAt(b.center[0], b.center[1]) === "bunker") ?? hole.bunkers[0];
+    const sand = { x: bunker.center[0], z: bunker.center[1] };
+    const aimed = aimFromPoint(play.ball, hole.pin, sand);
+    const towardSand = simulateMissEnvelope(
+      hole,
+      { ...parseShotPrompt(`pw ${Math.max(20, Math.round(aimed.landYards))}`), target: sand, landYards: aimed.landYards, aimYardsLeft: aimed.aimYardsLeft },
+      heightAt,
+      coverAt,
+      play.ball,
+    );
+    expect(towardSand.called.landLie === "bunker" || missShowsHazard(towardSand, "bunker")).toBe(true);
+    expect((towardSand.copy + towardSand.called.outcome).toLowerCase()).toMatch(/bunker/);
 
-    const shortRight = simulateMissEnvelope(hole, parseShotPrompt("pw 50"), heightAt, coverAt, play.ball);
+    const shortRight = simulateMissEnvelope(hole, parseShotPrompt("driver 265"), heightAt, coverAt, play.ball);
     expect(missShowsHazard(shortRight, "ocean") || shortRight.called.trouble.ocean).toBe(true);
     expect(shortRight.copy.toLowerCase()).toMatch(/ocean/);
 

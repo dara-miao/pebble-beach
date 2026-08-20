@@ -94,6 +94,10 @@ export function ballAt(x: number, z: number, hole: HoleData, coverAt: (x: number
 export function createHolePlay(hole: HoleData, tee: TeeSet, coverAt: (x: number, z: number) => Cover): HolePlay {
   const [x, z] = teeStance(hole, tee);
   const ball = ballAt(x, z, hole, coverAt);
+  if (!ball.holed && ball.lie !== "ocean") {
+    ball.lie = "tee";
+    if (ball.cover !== "ocean") ball.cover = "tee";
+  }
   const scorecard = hole.yards[tee] ?? ball.pinYards;
   return {
     holeNumber: hole.number,

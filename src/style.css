@@ -380,10 +380,36 @@ body {
 }
 
 .score-row.ids span,
+.score-row.ids button,
 .score-row.par span:last-child,
 .score-row.strokes span:last-child {
   color: #d8b56f;
   font-weight: 600;
+}
+
+.score-row.ids button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  color: #d8b56f;
+  cursor: pointer;
+  padding: 0;
+}
+
+.score-row.ids button:hover {
+  color: #fff;
+}
+
+.score-row.ids button.on {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.wind-mph button:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .score-row.strokes span.done {

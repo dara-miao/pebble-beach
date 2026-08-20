@@ -139,7 +139,7 @@ export function renderHud(
         })
         .join("")}
     </nav>
-    ${scorecardHtml(play)}
+    ${scorecardHtml(play, hole.number)}
 
     <div class="panel controls">
       <div class="control-block">
@@ -170,9 +170,9 @@ export function renderHud(
           ).join("")}
         </div>
         <div class="wind-mph">
-          <button type="button" data-wind-mph-delta="-2">−</button>
+          <button type="button" data-wind-mph-delta="-2" ${play.wind.mph <= 0 ? "disabled" : ""}>−</button>
           <b>${play.wind.mph === 0 ? "Still" : `${play.wind.mph} mph`}</b>
-          <button type="button" data-wind-mph-delta="2">+</button>
+          <button type="button" data-wind-mph-delta="2" ${play.wind.mph >= 32 ? "disabled" : ""}>+</button>
           ${[0, 8, 14, 20]
             .map(
               (n) =>
@@ -314,14 +314,19 @@ function shotPanelHtml(shot: ShotHudInfo | undefined, play: PlayHudView): string
   </div>`;
 }
 
-function scorecardHtml(play: PlayHudView): string {
+function scorecardHtml(play: PlayHudView, currentHole: number): string {
   const front = play.round.holes.filter((h) => h.number <= 9);
   const back = play.round.holes.filter((h) => h.number >= 10);
   const row = (holes: typeof front, title: string) => {
     const par = holes.reduce((n, h) => n + h.par, 0);
     const strokes = holes.every((h) => h.strokes == null) ? "—" : String(holes.reduce((n, h) => n + (h.strokes ?? 0), 0));
     return `<div class="score-nine">
-      <div class="score-row ids"><em>${title}</em>${holes.map((h) => `<span>${h.number}</span>`).join("")}<span>Tot</span></div>
+      <div class="score-row ids"><em>${title}</em>${holes
+        .map(
+          (h) =>
+            `<button type="button" class="score-id${h.number === currentHole ? " on" : ""}" data-hole="${h.number}">${h.number}</button>`,
+        )
+        .join("")}<span>Tot</span></div>
       <div class="score-row par"><em>Par</em>${holes.map((h) => `<span>${h.par}</span>`).join("")}<span>${par}</span></div>
       <div class="score-row strokes"><em>Strokes</em>${holes
         .map((h) => `<span class="${h.completed ? "done" : ""}">${h.strokes ?? "·"}</span>`)
@@ -380,7 +385,7 @@ function clearStatusLine(hazard: { label: string; carryYards: number; exitYards:
   return `${hazard.carryYards} · covers`;
 }
 
-function shotChips(play: PlayHudView): { label: string; prompt: string }[] {
+export function shotChips(play: PlayHudView): { label: string; prompt: string }[] {
   if (play.holed) return [];
   const suggested = play.suggestion;
   if (play.lie === "ocean") {
