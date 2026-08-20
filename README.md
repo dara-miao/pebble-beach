@@ -25,8 +25,8 @@ npm run build
 1. You stand on the tee (or last lie) in **Stand** camera.
 2. Type a shot, or use a suggestion chip. Example: `driver 250 fade`, `7 iron 155 draw`, `pw 80`, `putt 24 ft`.
 3. **Preview** draws the flight and miss envelope. **Hit** commits the shot.
-4. The ball stays at the landing. Play the leftover from that lie until you hole out.
-5. Move to the next hole. The card is all 18.
+4. The ball stays at the landing. A short result sting shows leftover and lie (quieter on Preview than Hit).
+5. Hole out: a score beat (birdie / par / bogey…), then the next tee. Hole 18 stays put until **New round**. **Reset hole** replays the same hole.
 
 ### Aiming
 

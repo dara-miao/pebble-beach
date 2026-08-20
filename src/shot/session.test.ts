@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { holeByNumber } from "../course/geom";
+import { holeByNumber, OPENING_HOLE } from "../course/geom";
 import { loadCourse } from "../course/load";
 import { buildCoverIndex, heightAt as sampleHeight } from "../scene/cover";
 import { shotChips } from "../ui/hud";
@@ -14,10 +14,39 @@ function session() {
   return createPlaySession(course, coverAt, heightAt);
 }
 
+function holeOutTap(s: ReturnType<typeof session>, holeNumber: number) {
+  s.applyChange({ hole: holeNumber });
+  const hole = s.holeData;
+  const dx = hole.tee[0] - hole.pin[0];
+  const dz = hole.tee[1] - hole.pin[1];
+  const len = Math.hypot(dx, dz) || 1;
+  const ball = s.play.ball;
+  ball.x = hole.pin[0] + (dx / len) * 5;
+  ball.z = hole.pin[1] + (dz / len) * 5;
+  ball.lie = "green";
+  ball.cover = "green";
+  ball.pinYards = 5;
+  ball.remainingYards = 5;
+  ball.holed = false;
+  s.setAimFromGround({ x: hole.pin[0], z: hole.pin[1] });
+  const hit = s.fireShot("putt 20 ft");
+  if (!hit || !s.play.ball.holed) {
+    ball.x = hole.pin[0] + (dx / len) * 2.2;
+    ball.z = hole.pin[1] + (dz / len) * 2.2;
+    ball.lie = "green";
+    ball.cover = "green";
+    ball.pinYards = 2.2;
+    ball.remainingYards = 2.2;
+    ball.holed = false;
+    s.setAimFromGround({ x: hole.pin[0], z: hole.pin[1] });
+    s.fireShot("putt 10 ft");
+  }
+}
+
 describe("button / handler smoke", () => {
   it("hole picker, scorecard-equivalent applyChange, and arrows change hole leftover", () => {
     const s = session();
-    expect(s.state.hole).toBe(1);
+    expect(s.state.hole).toBe(OPENING_HOLE);
     const startLeft = s.play.ball.remainingYards;
     s.applyChange({ hole: 7 });
     expect(s.state.hole).toBe(7);
@@ -126,10 +155,78 @@ describe("button / handler smoke", () => {
     s.fireShot(s.playView().suggestion.prompt);
     expect(s.round.holes.some((h) => h.strokes != null)).toBe(true);
     s.newRound();
-    expect(s.state.hole).toBe(1);
+    expect(s.state.hole).toBe(OPENING_HOLE);
     expect(s.play.strokes).toBe(0);
     expect(s.round.holes.every((h) => h.strokes == null)).toBe(true);
     expect(s.playView().thru.label).toBe("—");
+  });
+
+  it("shot sting fires on Hit, not on empty submit or preview", () => {
+    const s = session();
+    s.applyChange({ hole: 8 });
+    expect(s.juice).toBeNull();
+    const preview = s.previewShot("driver 250");
+    expect(preview?.kind).toBe("preview");
+    expect(s.juice).toBeNull();
+    expect(s.fireShot("")).toBeNull();
+    expect(s.fireShot("   ")).toBeNull();
+    expect(s.juice).toBeNull();
+    expect(s.play.strokes).toBe(0);
+    const hit = s.fireShot("driver 250");
+    expect(hit).toBeTruthy();
+    expect(s.shotInfo?.kind).toBe("result");
+    expect(s.juice?.kind).toBe("shot");
+    expect(s.juice && "headline" in s.juice ? s.juice.headline : "").toBeTruthy();
+    expect(s.state.hole).toBe(8);
+  });
+
+  it("hole-out on hole N auto-advances to N+1 after the beat", () => {
+    const s = session();
+    holeOutTap(s, 7);
+    expect(s.play.ball.holed).toBe(true);
+    expect(s.juice?.kind).toBe("hole-out");
+    expect(s.juice && s.juice.kind !== "shot" ? s.juice.nextHole : null).toBe(8);
+    expect(s.state.hole).toBe(7);
+    const posted = s.round.holes.find((h) => h.number === 7);
+    expect(posted?.completed).toBe(true);
+    expect(posted?.strokes).toBe(s.play.strokes);
+    const change = s.advanceAfterBeat();
+    expect(change?.holeChanged).toBe(true);
+    expect(s.state.hole).toBe(8);
+    expect(s.play.holeNumber).toBe(8);
+    expect(s.play.ball.holed).toBe(false);
+    expect(s.play.strokes).toBe(0);
+    expect(s.playView().lieLabel.toLowerCase()).toMatch(/tee/);
+    expect(s.playView().leftoverLabel).toMatch(/\d/);
+    expect(s.playView().suggestion.prompt.length).toBeGreaterThan(0);
+    expect(s.round.holes.find((h) => h.number === 7)?.strokes).toBe(posted?.strokes);
+    expect(s.juice).toBeNull();
+  });
+
+  it("hole 18 does not silently wrap after the beat", () => {
+    const s = session();
+    holeOutTap(s, 18);
+    expect(s.play.ball.holed).toBe(true);
+    expect(s.juice?.kind).toBe("round-done");
+    expect(s.juice && s.juice.kind !== "shot" ? s.juice.nextHole : 1).toBeNull();
+    expect(s.advanceAfterBeat()).toBeNull();
+    expect(s.state.hole).toBe(18);
+    expect(s.play.ball.holed).toBe(true);
+    expect(s.round.holes.find((h) => h.number === 18)?.completed).toBe(true);
+  });
+
+  it("reset after hole-out replays the same hole and does not skip ahead", () => {
+    const s = session();
+    holeOutTap(s, 7);
+    expect(s.juice?.kind).toBe("hole-out");
+    s.resetHole();
+    expect(s.state.hole).toBe(7);
+    expect(s.play.strokes).toBe(0);
+    expect(s.play.ball.holed).toBe(false);
+    expect(s.juice).toBeNull();
+    expect(s.advanceAfterBeat()).toBeNull();
+    expect(s.state.hole).toBe(7);
+    expect(s.playView().suggestion.prompt.length).toBeGreaterThan(0);
   });
 
   it("click-to-aim sets a target and produces a preview", () => {
