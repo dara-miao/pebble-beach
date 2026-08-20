@@ -41,8 +41,11 @@ describe("hole 7 / hole 8 verify script", () => {
     const pinDirX = (hole.pin[0] - play.ball.x) / teeToPin;
     const pinDirZ = (hole.pin[1] - play.ball.z) / teeToPin;
     const teeBook = bookFromHere(play.ball, hole, { ux: pinDirX, uz: pinDirZ }, coverAt);
-    expect(teeBook.firstTrouble?.kind).toBe("bunker");
-    expect(teeBook.firstTrouble!.carryYards).toBeGreaterThan(50);
+    expect(teeBook.firstTrouble).toBeTruthy();
+    const bunker = teeBook.hazards.find((h) => h.kind === "bunker");
+    expect(bunker).toBeTruthy();
+    expect(bunker!.carryYards).toBeGreaterThan(50);
+    expect(bunker!.carryYards).toBeLessThan(teeToPin + 20);
     expect(suggestShot(play.ball.lie, play.ball.remainingYards, play.ball.pinYards).club).not.toBe("putter");
 
     const landing = aimAlong(play.ball, hole, 80, 8);

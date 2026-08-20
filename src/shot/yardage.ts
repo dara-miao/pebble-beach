@@ -30,6 +30,7 @@ export interface HereBook {
   hazards: LineHazard[];
   firstTrouble: LineHazard | null;
   coverYards: number | null;
+  inPlay: ClearStatus | null;
   suggest: SuggestedShot;
 }
 
@@ -167,6 +168,7 @@ export function bookFromHere(
   const hazards = origin.holed ? [] : scanLineHazards(origin, aim.ux, aim.uz, maxScan, coverAt, hole);
   const firstTrouble = hazards[0] ?? null;
   const coverYards = firstTrouble ? firstTrouble.exitYards : null;
+  const inPlay = firstTrouble && plannedCarry != null ? clearStatus(plannedCarry, firstTrouble) : null;
   return {
     leftoverYards: leftover,
     leftoverLabel,
@@ -176,6 +178,7 @@ export function bookFromHere(
     firstTrouble,
     coverYards,
     suggest: suggestShot(origin.lie, origin.remainingYards, origin.pinYards, targetYards),
+    inPlay,
   };
 }
 
