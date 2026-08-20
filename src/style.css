@@ -24,19 +24,45 @@ body {
   inset: 16px auto 16px 16px;
   width: min(352px, calc(100vw - 28px));
   max-height: calc(100vh - 32px);
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(215, 181, 109, 0.35) transparent;
+  overflow: hidden;
   pointer-events: none;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  z-index: 2;
+  z-index: 4;
 }
 
 #hud > * {
   pointer-events: auto;
+}
+
+.hud-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(215, 181, 109, 0.35) transparent;
+  overscroll-behavior: contain;
+}
+
+.panel.shot {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  max-height: min(48vh, 360px);
+  z-index: 1;
+  box-shadow:
+    0 -10px 28px rgba(0, 0, 0, 0.22),
+    0 12px 40px rgba(0, 0, 0, 0.28);
+}
+
+.panel.shot .shot-panel {
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .panel {
@@ -544,6 +570,12 @@ body {
   color: #f3eee4;
 }
 
+@media (max-height: 560px) {
+  .panel.shot .chips {
+    display: none;
+  }
+}
+
 .idle {
   margin-top: 10px;
   font-size: 12px;
@@ -720,6 +752,11 @@ body {
   align-items: flex-start;
   justify-content: center;
   padding: 10vh 16px 0;
+}
+
+.juice-hole-out,
+.juice-round-done {
+  z-index: 5;
 }
 
 @media (min-width: 720px) {

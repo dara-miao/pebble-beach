@@ -4,7 +4,7 @@ import { loadCourse } from "../course/load";
 import { buildCoverIndex, heightAt as sampleHeight } from "../scene/cover";
 import { createPlaySession } from "../shot/session";
 import { holeOutBeatFrom, shotStingFrom } from "../shot/juice";
-import { renderHud, shotChips, type HudHandlers } from "./hud";
+import { renderHud, shotChips, updateShotPanel, type HudHandlers } from "./hud";
 import { renderJuice } from "./juice";
 
 const course = loadCourse();
@@ -65,6 +65,13 @@ describe("HUD control wiring", () => {
     el.querySelector<HTMLButtonElement>("[data-new-round]")!.click();
     expect(onNewRound).toHaveBeenCalled();
 
+    const shotBar = el.querySelector(".panel.shot");
+    const form = el.querySelector<HTMLFormElement>(".shot-form")!;
+    expect(shotBar).toBeTruthy();
+    expect(el.querySelector(".hud-scroll")).toBeTruthy();
+    expect(el.querySelector(".hud-scroll .shot-form")).toBeNull();
+    expect(shotBar!.contains(form)).toBe(true);
+
     const chips = el.querySelectorAll<HTMLButtonElement>("[data-ex]");
     expect(chips.length).toBe(shotChips(s.playView()).length);
     expect(chips.length).toBeGreaterThan(0);
@@ -74,7 +81,6 @@ describe("HUD control wiring", () => {
     const input = el.querySelector<HTMLInputElement>("input[name=prompt]")!;
     expect(input.value).toBe(filled);
 
-    const form = el.querySelector<HTMLFormElement>(".shot-form")!;
     input.value = "";
     form.requestSubmit();
     expect(onShot).not.toHaveBeenCalled();
@@ -98,6 +104,31 @@ describe("HUD control wiring", () => {
     expect(input.value.toLowerCase()).toMatch(/fade/);
     el.querySelector<HTMLFormElement>(".shot-form")!.requestSubmit();
     expect(onShot).toHaveBeenCalledWith(input.value);
+  });
+
+  it("writes preview copy into the pinned shot bar", () => {
+    const { el, s } = mount({
+      onChange: vi.fn(),
+      onShot: vi.fn(),
+      onPreview: vi.fn(),
+      onReset: vi.fn(),
+      onWind: vi.fn(),
+      onNewRound: vi.fn(),
+    });
+    updateShotPanel(el, s.playView(), s.holeData, {
+      kind: "preview",
+      summary: "7 iron 155",
+      outcome: "Fairway, 40 yds left",
+      carry: 155,
+      roll: 8,
+      total: 163,
+      peak: 28,
+      leftover: 40,
+      leftoverLabel: "40 yds",
+    });
+    const panel = el.querySelector(".panel.shot .shot-panel");
+    expect(panel?.textContent).toMatch(/Preview/);
+    expect(panel?.textContent).toMatch(/Fairway/);
   });
 });
 
