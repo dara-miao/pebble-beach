@@ -10,8 +10,11 @@ import { addTrees } from "./scene/trees";
 import { createCourseCamera } from "./camera/courseCamera";
 import { renderHud, updateShotPanel, type HudState, type PlayHudView, type ShotHudInfo } from "./ui/hud";
 import { describeShot, parseShotPrompt, promptSpecifiesAim } from "./shot/parse";
-import { resolveAim, simulateShot } from "./shot/simulate";
+import { simulateMissEnvelope } from "./shot/miss";
+import { resolveAim } from "./shot/simulate";
 import { applyShotResult, createHolePlay, leftoverCopy, lieCopy, resolveOrigin, scoreCopy, type HolePlay } from "./shot/play";
+import { createRound, resetRound, roundThru, syncHoleScore, type RoundCard } from "./shot/round";
+import { DEFAULT_WIND, normalizeWind, windOnShotCopy, type WindCondition } from "./shot/wind";
 import { lieLabel } from "./shot/lie";
 import { bookFromHere, suggestShot } from "./shot/yardage";
 import { clearAimVisual, clearPreviewVisual, playShotVisual, showPreviewVisual, upsertAimVisual, upsertLieMarker, type ShotVisual } from "./shot/visual";
@@ -157,7 +160,11 @@ let draftPrompt = "";
 let previewTimer = 0;
 
 const state: HudState = { hole: 7, tee: "blue", camera: "address" };
+const plays = new Map<number, HolePlay>();
+const winds = new Map<number, WindCondition>();
+let round: RoundCard = createRound(course, state.tee);
 let play = createPlay();
+plays.set(state.hole, play);
 let aimTarget: { x: number; z: number } | null = null;
 
 function activeHole(): HoleData {
@@ -166,6 +173,24 @@ function activeHole(): HoleData {
 
 function createPlay(): HolePlay {
   return createHolePlay(activeHole(), state.tee, terrain.coverAt);
+}
+
+function holeWind(): WindCondition {
+  return winds.get(state.hole) ?? DEFAULT_WIND;
+}
+
+function adoptPlay(next: HolePlay) {
+  play = next;
+  plays.set(state.hole, next);
+  round = syncHoleScore(round, next.holeNumber, next.strokes, next.ball.holed);
+}
+
+function ensurePlay(holeNumber: number): HolePlay {
+  const existing = plays.get(holeNumber);
+  if (existing && existing.tee === state.tee) return existing;
+  const next = createHolePlay(holeByNumber(course, holeNumber), state.tee, terrain.coverAt);
+  plays.set(holeNumber, next);
+  return next;
 }
 
 function playView(): PlayHudView {
@@ -194,6 +219,10 @@ function playView(): PlayHudView {
     book,
     suggestion,
     cardYards: hole.yards[state.tee] ?? hole.yards.blue,
+    wind: holeWind(),
+    windOnShot: windOnShotCopy(holeWind(), aim.ux, aim.uz),
+    round,
+    thru: roundThru(round),
   };
 }
 
@@ -258,14 +287,14 @@ function refreshHud() {
     activeHole(),
     state,
     playView(),
-    { onChange: applyHole, onShot: fireShot, onPreview: queuePreview, onReset: resetHole },
+    { onChange: applyHole, onShot: fireShot, onPreview: queuePreview, onReset: resetHole, onWind: applyWind, onNewRound: newRound },
     shotInfo,
     draftPrompt,
   );
 }
 
 function resetHole() {
-  play = createPlay();
+  adoptPlay(createPlay());
   shotInfo = undefined;
   aimTarget = null;
   draftPrompt = defaultPrompt();
@@ -278,21 +307,49 @@ function resetHole() {
   refreshHud();
 }
 
+function newRound() {
+  plays.clear();
+  round = resetRound(round);
+  adoptPlay(createPlay());
+  shotInfo = undefined;
+  aimTarget = null;
+  draftPrompt = defaultPrompt();
+  clearPreviewVisual(scene);
+  clearAimVisual(scene);
+  const old = scene.getObjectByName("shot-visual");
+  old?.parent?.remove(old);
+  placeLieMarker(true);
+  setCamera();
+  refreshHud();
+}
+
+function applyWind(next: Partial<WindCondition>) {
+  const prev = holeWind();
+  const wind = normalizeWind({ ...prev, ...next });
+  winds.set(state.hole, wind);
+  if (draftPrompt.trim()) previewShot(draftPrompt);
+  refreshHud();
+}
+
 function applyHole(next: Partial<HudState>) {
   const holeChanged = next.hole != null && next.hole !== state.hole;
   const teeChanged = next.tee != null && next.tee !== state.tee;
   Object.assign(state, next);
+  if (teeChanged) {
+    plays.set(state.hole, createPlay());
+    round = syncHoleScore(round, state.hole, 0, false);
+  }
   if (holeChanged || teeChanged) {
-    play = createPlay();
-    shotInfo = undefined;
+    play = ensurePlay(state.hole);
+    shotInfo = play.lastShot ? resultFromLast() : undefined;
     aimTarget = null;
     draftPrompt = "";
     clearPreviewVisual(scene);
     clearAimVisual(scene);
     const old = scene.getObjectByName("shot-visual");
     old?.parent?.remove(old);
+    draftPrompt = defaultPrompt();
   }
-  if (holeChanged || teeChanged) draftPrompt = defaultPrompt();
   const hole = activeHole();
   markers.removeFromParent();
   markers = addYardageMarkers(scene, hole, terrain.heightAt);
@@ -319,9 +376,11 @@ function simulateFromPrompt(prompt: string) {
   const hole = activeHole();
   const req = composeRequest(prompt);
   const { origin, dropped } = resolveOrigin(play, hole, terrain.coverAt);
-  const result = simulateShot(hole, req, terrain.heightAt, terrain.coverAt, origin, dropped);
+  const wind = holeWind();
+  const envelope = simulateMissEnvelope(hole, req, terrain.heightAt, terrain.coverAt, origin, dropped, wind);
+  const result = envelope.called;
   const info: ShotHudInfo = {
-    summary: describeShot(req, lieLabel(origin.lie).toLowerCase()),
+    summary: describeShot(req, lieLabel(origin.lie).toLowerCase(), wind.mph > 0 ? playViewWind(origin, hole, wind) : undefined),
     outcome: result.outcome,
     carry: result.carryYards,
     total: result.totalYards,
@@ -342,8 +401,16 @@ function simulateFromPrompt(prompt: string) {
     land: [result.end.x, result.end.z],
     target: aimTarget ? [aimTarget.x, aimTarget.z] : [result.aim.target.x, result.aim.target.z],
     plannedCarry: result.carryYards,
+    miss: envelope.copy,
+    missDanger: !envelope.safe,
+    missLandings: envelope.samples.map((s) => [s.x, s.z] as [number, number]),
   };
-  return { req, result, info, origin };
+  return { req, result, info, origin, envelope };
+}
+
+function playViewWind(origin: { x: number; z: number }, hole: ReturnType<typeof activeHole>, wind: WindCondition) {
+  const aim = currentAim(origin, hole);
+  return windOnShotCopy(wind, aim.ux, aim.uz);
 }
 
 function queuePreview(prompt: string) {
@@ -361,9 +428,9 @@ function previewShot(prompt: string) {
     updateShotPanel(hudEl, playView(), activeHole(), shotInfo);
     return;
   }
-  const { result, info } = simulateFromPrompt(trimmed);
+  const { result, info, envelope } = simulateFromPrompt(trimmed);
   shotInfo = { ...info, kind: "preview" };
-  showPreviewVisual(scene, result);
+  showPreviewVisual(scene, result, envelope, terrain.heightAt);
   updateShotPanel(hudEl, playView(), activeHole(), shotInfo);
 }
 
@@ -403,8 +470,8 @@ function fireShot(prompt: string) {
   draftPrompt = trimmed;
   const hole = activeHole();
   const { result, info } = simulateFromPrompt(trimmed);
-  play = applyShotResult(play, result, hole, terrain.coverAt);
-  shotInfo = { ...info, kind: "result" };
+  adoptPlay(applyShotResult(play, result, hole, terrain.coverAt));
+  shotInfo = { ...info, kind: "result", miss: undefined, missDanger: undefined, missLandings: undefined };
   aimTarget = null;
   draftPrompt = defaultPrompt();
   placeLieMarker(false);

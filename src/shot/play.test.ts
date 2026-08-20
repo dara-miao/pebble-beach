@@ -4,8 +4,11 @@ import type { Cover } from "../scene/cover";
 import { parseShotPrompt } from "./parse";
 import { applyLieToCarry } from "./lie";
 import { applyShotResult, ballAt, createHolePlay, pinDistance3d, resolveOrigin } from "./play";
+import { missShowsHazard, simulateMissEnvelope } from "./miss";
+import { clearHole, createRound, recordHole, resetRound, roundThru, syncHoleScore } from "./round";
 import { aimFromPoint, simulateShot } from "./simulate";
 import { bookFromHere, clearStatus, suggestShot } from "./yardage";
+import { projectWind, resolveFlightWind, windBlowVector } from "./wind";
 
 function mockHole(over: Partial<HoleData> = {}): HoleData {
   return {
@@ -69,6 +72,41 @@ function playShot(play: ReturnType<typeof createHolePlay>, hole: HoleData, promp
   const { origin, dropped } = resolveOrigin(play, hole, coverAt);
   const result = simulateShot(hole, parseShotPrompt(prompt), heightAt, coverAt, origin, dropped);
   return { result, play: applyShotResult(play, result, hole, coverAt) };
+}
+
+function mockCourse() {
+  const seven = mockHole();
+  const eight = mockHole({
+    number: 8,
+    par: 4,
+    tee: [40, 10],
+    path: [
+      [40, 10],
+      [40, 220],
+    ],
+    greenCenter: [40, 220],
+    pin: [40, 220],
+  });
+  return {
+    name: "Test",
+    location: "Test",
+    origin: { lat: 0, lon: 0, note: "" },
+    units: "yards",
+    par: 7,
+    scorecard: {
+      blue: { name: "Blue", total: 320, holes: [100, 220] },
+    },
+    holes: [seven, eight],
+    unassignedBunkers: [],
+    rough: [],
+    cartpaths: [],
+    coastline: [],
+    water: [],
+    woods: [],
+    trees: [],
+    elevation: { originX: 0, originZ: 0, stepX: 1, stepZ: 1, width: 2, height: 2, heightsYards: [[0, 0], [0, 0]] },
+    source: "test",
+  };
 }
 
 describe("sequential lie play", () => {
@@ -325,5 +363,146 @@ describe("sequential lie play", () => {
     expect(play.ball.remainingYards).toBe(0);
     expect(lag.leftoverLabel).toBe("Holed");
     expect(lag.outcome.toLowerCase()).toMatch(/holed/);
+  });
+});
+
+describe("miss envelope", () => {
+  it("shows a push into the bunker while the called shot stays safe", () => {
+    const hole = mockHole();
+    const origin = ballAt(0, 0, hole, coverAt);
+    const env = simulateMissEnvelope(hole, parseShotPrompt("7 iron 85"), heightAt, coverAt, origin);
+    expect(env.called.trouble.bunker).toBe(false);
+    expect(env.called.trouble.ocean).toBe(false);
+    expect(env.called.landLie).not.toBe("bunker");
+    expect(missShowsHazard(env, "bunker")).toBe(true);
+    const push = env.samples.find((s) => s.kind === "push");
+    expect(push?.trouble.bunker).toBe(true);
+    expect(env.copy.toLowerCase()).toMatch(/bunker/);
+    expect(env.safe).toBe(false);
+  });
+
+  it("shows a long miss into the ocean and a conservative shot that stays safe", () => {
+    const hole = mockHole();
+    const origin = ballAt(0, 0, hole, coverAt);
+    const long = simulateMissEnvelope(hole, parseShotPrompt("6 iron 120"), heightAt, coverAt, origin);
+    expect(long.called.trouble.ocean).toBe(false);
+    expect(missShowsHazard(long, "ocean")).toBe(true);
+    expect(long.copy.toLowerCase()).toMatch(/ocean/);
+
+    const safe = simulateMissEnvelope(hole, parseShotPrompt("pw 45"), heightAt, coverAt, origin);
+    expect(safe.called.landLie).toBe("fairway");
+    expect(safe.safe).toBe(true);
+    expect(safe.copy).toBe("Miss stays safe");
+    expect(missShowsHazard(safe, "bunker")).toBe(false);
+    expect(missShowsHazard(safe, "ocean")).toBe(false);
+  });
+
+  it("keeps Hit on the called line — envelope samples are preview only", () => {
+    const hole = mockHole();
+    const origin = ballAt(0, 0, hole, coverAt);
+    const req = parseShotPrompt("7 iron 85");
+    const env = simulateMissEnvelope(hole, req, heightAt, coverAt, origin);
+    const hit = simulateShot(hole, req, heightAt, coverAt, origin);
+    expect(hit.end.x).toBeCloseTo(env.called.end.x, 8);
+    expect(hit.end.z).toBeCloseTo(env.called.end.z, 8);
+    expect(env.samples).toHaveLength(4);
+    expect(env.samples.some((s) => Math.hypot(s.x - hit.end.x, s.z - hit.end.z) > 3)).toBe(true);
+  });
+});
+
+describe("hole wind", () => {
+  it("moves carry and landing when the hole wind changes", () => {
+    const hole = mockHole();
+    const origin = ballAt(0, 0, hole, coverAt);
+    const req = parseShotPrompt("7 iron 150");
+    const still = simulateShot(hole, req, heightAt, coverAt, origin, false, { mph: 0, from: "S" });
+    const into = simulateShot(hole, req, heightAt, coverAt, origin, false, { mph: 16, from: "S" });
+    const down = simulateShot(hole, req, heightAt, coverAt, origin, false, { mph: 16, from: "N" });
+    expect(still.wind.carryAdj).toBe(0);
+    expect(into.carryYards).toBeLessThan(still.carryYards);
+    expect(down.carryYards).toBeGreaterThan(still.carryYards);
+    expect(into.end.z).toBeLessThan(still.end.z);
+    expect(down.end.z).toBeGreaterThan(still.end.z);
+    expect(into.wind.alongMph).toBeLessThan(0);
+    expect(down.wind.alongMph).toBeGreaterThan(0);
+  });
+
+  it("pushes the miss envelope with a crosswind", () => {
+    const hole = mockHole();
+    const origin = ballAt(0, 0, hole, coverAt);
+    const req = parseShotPrompt("7 iron 80");
+    const still = simulateMissEnvelope(hole, req, heightAt, coverAt, origin, false, { mph: 0, from: "W" });
+    const offRight = simulateMissEnvelope(hole, req, heightAt, coverAt, origin, false, { mph: 18, from: "W" });
+    expect(offRight.called.end.x).not.toBeCloseTo(still.called.end.x, 0);
+    expect(Math.abs(offRight.called.end.x - still.called.end.x)).toBeGreaterThan(3);
+    const stillPush = still.samples.find((s) => s.kind === "push")!;
+    const windPush = offRight.samples.find((s) => s.kind === "push")!;
+    expect(Math.abs(windPush.x - stillPush.x)).toBeGreaterThan(2);
+  });
+
+  it("projects compass wind onto the shot using course axes", () => {
+    expect(windBlowVector("N")).toEqual({ wx: 0, wz: 1 });
+    expect(windBlowVector("W")).toEqual({ wx: 1, wz: 0 });
+    const into = projectWind({ mph: 10, from: "S" }, 0, 1);
+    expect(into.alongMph).toBeCloseTo(-10, 5);
+    expect(into.carryAdj).toBeCloseTo(-11, 5);
+    const down = projectWind({ mph: 10, from: "N" }, 0, 1);
+    expect(down.alongMph).toBeCloseTo(10, 5);
+    expect(down.carryAdj).toBeCloseTo(14, 5);
+    const prompt = resolveFlightWind(parseShotPrompt("7 iron 150 into the wind"), 0, 1, { mph: 0, from: "W" });
+    expect(prompt.carryAdj).toBeLessThan(0);
+  });
+});
+
+describe("round scorecard", () => {
+  it("keeps par, strokes, and to-par across two holes", () => {
+    const course = mockCourse();
+    let card = createRound(course, "blue");
+    expect(roundThru(card).label).toBe("—");
+
+    card = recordHole(card, 7, 4, true);
+    let thru = roundThru(card);
+    expect(thru.played).toBe(1);
+    expect(thru.strokes).toBe(4);
+    expect(thru.par).toBe(3);
+    expect(thru.toPar).toBe(1);
+    expect(thru.label).toBe("+1");
+
+    card = recordHole(card, 8, 4, true);
+    thru = roundThru(card);
+    expect(thru.played).toBe(2);
+    expect(thru.strokes).toBe(8);
+    expect(thru.par).toBe(7);
+    expect(thru.toPar).toBe(1);
+    expect(thru.label).toBe("+1");
+    expect(card.holes.find((h) => h.number === 7)?.strokes).toBe(4);
+
+    card = clearHole(card, 7);
+    thru = roundThru(card);
+    expect(card.holes.find((h) => h.number === 7)?.strokes).toBeNull();
+    expect(thru.played).toBe(1);
+    expect(thru.strokes).toBe(4);
+    expect(thru.par).toBe(4);
+    expect(thru.label).toBe("E");
+
+    card = resetRound(card);
+    expect(roundThru(card).played).toBe(0);
+    expect(card.holes.every((h) => h.strokes == null)).toBe(true);
+  });
+
+  it("syncs in-progress hole strokes and survives switching holes", () => {
+    const seven = mockHole();
+    const eight = mockHole({ number: 8, par: 4, tee: [40, 10], path: [[40, 10], [40, 220]], greenCenter: [40, 220], pin: [40, 220] });
+    const course = mockCourse();
+    let card = createRound(course, "blue");
+    const onSeven = playShot(createHolePlay(seven, "blue", coverAt), seven, "7 iron 70").play;
+    card = syncHoleScore(card, 7, onSeven.strokes, onSeven.ball.holed);
+    const onEight = playShot(createHolePlay(eight, "blue", coverAt), eight, "driver 180").play;
+    card = syncHoleScore(card, 8, onEight.strokes, onEight.ball.holed);
+    expect(card.holes.find((h) => h.number === 7)?.strokes).toBe(onSeven.strokes);
+    expect(card.holes.find((h) => h.number === 8)?.strokes).toBe(onEight.strokes);
+    expect(roundThru(card).played).toBe(2);
+    expect(onSeven.strokes).toBeGreaterThan(0);
+    expect(onEight.strokes).toBeGreaterThan(0);
   });
 });

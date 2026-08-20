@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { Lie } from "./lie";
+import type { MissEnvelope } from "./miss";
 import type { ShotResult } from "./simulate";
 
 export interface ShotVisual {
@@ -134,7 +135,59 @@ function addTube(group: THREE.Group, pts: THREE.Vector3[], radius: number, color
   group.add(tube);
 }
 
-export function showPreviewVisual(scene: THREE.Scene, result: ShotResult): void {
+function missTint(sample: MissEnvelope["samples"][number]): number {
+  if (sample.trouble.ocean) return 0x3ec6e8;
+  if (sample.trouble.bunker) return 0xe8c56a;
+  if (sample.trouble.woods) return 0x4a9a58;
+  return 0x8aa8c4;
+}
+
+function addMissEnvelope(group: THREE.Group, envelope: MissEnvelope, heightAt: (x: number, z: number) => number) {
+  if (envelope.samples.length < 2) return;
+  const order: Array<MissEnvelope["samples"][number]["kind"]> = ["short", "pull", "long", "push"];
+  const byKind = new Map(envelope.samples.map((s) => [s.kind, s]));
+  const diamond: THREE.Vector3[] = [];
+  for (const kind of order) {
+    const s = byKind.get(kind);
+    if (!s) continue;
+    diamond.push(new THREE.Vector3(s.x, heightAt(s.x, s.z) + 0.28, s.z));
+  }
+  if (diamond.length >= 3) {
+    const loop = diamond.concat(diamond[0]);
+    const danger = !envelope.safe;
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(loop),
+      new THREE.LineBasicMaterial({
+        color: envelope.hazard.ocean ? 0x3ec6e8 : envelope.hazard.bunker ? 0xe8c56a : 0x9ab4cc,
+        transparent: true,
+        opacity: danger ? 0.55 : 0.28,
+      }),
+    );
+    group.add(line);
+  }
+
+  for (const sample of envelope.samples) {
+    const tint = missTint(sample);
+    const danger = sample.trouble.ocean || sample.trouble.bunker || sample.trouble.woods;
+    const pts = sample.result.points.filter((p) => p.phase === "carry").map((p) => p.position.clone());
+    if (pts.length >= 2) addTube(group, pts, danger ? 0.2 : 0.14, tint, danger ? 0.28 : 0.12);
+    const land = new THREE.Vector3(sample.x, heightAt(sample.x, sample.z) + 0.2, sample.z);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(danger ? 1.05 : 0.7, danger ? 1.85 : 1.2, 16),
+      new THREE.MeshBasicMaterial({ color: tint, side: THREE.DoubleSide, transparent: true, opacity: danger ? 0.7 : 0.4 }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.copy(land);
+    group.add(ring);
+  }
+}
+
+export function showPreviewVisual(
+  scene: THREE.Scene,
+  result: ShotResult,
+  envelope?: MissEnvelope | null,
+  heightAt?: (x: number, z: number) => number,
+): void {
   removeNamed(scene, "shot-preview");
   if (result.points.length < 2) return;
   const group = new THREE.Group();
@@ -185,6 +238,8 @@ export function showPreviewVisual(scene: THREE.Scene, result: ShotResult): void 
     splash.position.set(land.x, 0.4, land.z);
     group.add(splash);
   }
+
+  if (envelope && heightAt) addMissEnvelope(group, envelope, heightAt);
 
   scene.add(group);
 }
