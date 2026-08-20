@@ -2,8 +2,9 @@ import { lieLabel, type Lie } from "./lie";
 import { leftoverAmount, leftoverUnit } from "./play";
 import { formatToPar } from "./round";
 
-export const SHOT_STING_MS = 1000;
-export const HOLE_OUT_HOLD_MS = 2000;
+export const SHOT_STING_MS = 1500;
+/** Hold after the shot visual finishes — long enough to read the score. */
+export const HOLE_OUT_HOLD_MS = 5000;
 export const LAST_HOLE = 18;
 
 export type JuiceTone = "good" | "neutral" | "bad";

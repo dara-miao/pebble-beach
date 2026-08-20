@@ -7,6 +7,7 @@ import {
   shotStingFrom,
   HOLE_OUT_HOLD_MS,
   LAST_HOLE,
+  SHOT_STING_MS,
 } from "./juice";
 
 describe("hole-out score names", () => {
@@ -43,7 +44,7 @@ describe("shot sting", () => {
         penaltyStrokes: 0,
         trouble: { ocean: false, bunker: false, woods: false },
       }),
-    ).toMatchObject({ kind: "shot", headline: "Nice", tone: "good" });
+    ).toMatchObject({ kind: "shot", headline: "Nice", tone: "good", holdMs: SHOT_STING_MS });
     expect(
       shotStingFrom({
         landLie: "green",
@@ -95,8 +96,10 @@ describe("hole-out beat", () => {
       nextHole: 8,
       holdMs: HOLE_OUT_HOLD_MS,
     });
-    expect(birdie.holdMs).toBeGreaterThanOrEqual(1500);
-    expect(birdie.holdMs).toBeLessThanOrEqual(2500);
+    expect(birdie.holdMs).toBeGreaterThanOrEqual(4500);
+    expect(birdie.holdMs).toBeLessThanOrEqual(5500);
+    expect(SHOT_STING_MS).toBeGreaterThanOrEqual(1200);
+    expect(SHOT_STING_MS).toBeLessThanOrEqual(1800);
     expect(birdie.detail).toMatch(/Hole 7/);
 
     const last = holeOutBeatFrom({ holeNumber: 18, strokes: 5 }, 5, "+2");

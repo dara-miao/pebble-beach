@@ -139,6 +139,8 @@ let markers = new THREE.Group();
 let activeShot: ShotVisual | null = null;
 let previewTimer = 0;
 let juiceTimer = 0;
+let juiceShowing = false;
+let juiceShownToken = 0;
 
 function lookAtPoint(): [number, number] {
   if (session.aimTarget) return [session.aimTarget.x, session.aimTarget.z];
@@ -201,26 +203,37 @@ function clearShotVisuals() {
 }
 
 function hideJuice() {
+  juiceShowing = false;
   window.clearTimeout(juiceTimer);
   renderJuice(juiceEl, null);
+}
+
+function finishLandedJuice() {
+  if (!juiceShowing) return;
+  if (session.juiceToken !== juiceShownToken) {
+    hideJuice();
+    return;
+  }
+  const change = session.advanceAfterBeat();
+  if (change?.holeChanged) {
+    hideJuice();
+    refreshPlayView(change);
+    return;
+  }
+  juiceShowing = false;
+  window.clearTimeout(juiceTimer);
+  if (!session.juice || session.juice.kind === "shot") renderJuice(juiceEl, null);
 }
 
 function showLandedJuice() {
   const beat = session.juice;
   if (!beat) return;
-  renderJuice(juiceEl, beat, { onNewRound: newRound });
-  const token = session.juiceToken;
+  // Hold starts only after the ball is in / flight is done — not at Hit.
+  juiceShowing = true;
+  juiceShownToken = session.juiceToken;
+  renderJuice(juiceEl, beat, { onNewRound: newRound, onSkip: finishLandedJuice });
   window.clearTimeout(juiceTimer);
-  juiceTimer = window.setTimeout(() => {
-    if (session.juiceToken !== token) return;
-    const change = session.advanceAfterBeat();
-    if (change?.holeChanged) {
-      hideJuice();
-      refreshPlayView(change);
-      return;
-    }
-    if (!session.juice || session.juice.kind === "shot") renderJuice(juiceEl, null);
-  }, beat.holdMs);
+  juiceTimer = window.setTimeout(finishLandedJuice, beat.holdMs);
 }
 
 function refreshPlayView(change: ReturnType<typeof session.applyChange>) {
@@ -294,8 +307,7 @@ function previewShot(prompt: string) {
 function fireShot(prompt: string) {
   const sim = session.fireShot(prompt);
   if (!sim) return;
-  window.clearTimeout(juiceTimer);
-  renderJuice(juiceEl, null);
+  hideJuice();
   placeLieMarker(false);
   activeShot = playShotVisual(scene, sim.result, Math.max(2.6, Math.min(4.2, sim.result.totalYards / 80)));
   cam.followShot(
@@ -355,6 +367,11 @@ tick();
 window.addEventListener("keydown", (e) => {
   const tag = (e.target as HTMLElement | null)?.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA") return;
+  if ((e.key === " " || e.key === "Enter") && juiceShowing && session.juice?.kind === "hole-out") {
+    e.preventDefault();
+    finishLandedJuice();
+    return;
+  }
   if (e.key === "ArrowRight") applyHole({ hole: (session.state.hole % 18) + 1 });
   if (e.key === "ArrowLeft") applyHole({ hole: session.state.hole === 1 ? 18 : session.state.hole - 1 });
   if (e.key === "a") applyHole({ camera: "address" });

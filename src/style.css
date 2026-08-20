@@ -759,16 +759,20 @@ body {
 
 .juice-banner {
   pointer-events: auto;
-  min-width: 220px;
+  min-width: 280px;
   text-align: center;
-  padding: 18px 28px 16px;
-  border-radius: 16px;
-  animation: juice-banner 260ms ease-out;
+  padding: 24px 36px 22px;
+  border-radius: 18px;
+  animation: juice-banner 260ms ease-out forwards;
+}
+
+.juice-banner.hole-out {
+  cursor: pointer;
 }
 
 .juice-kicker,
 .juice-next {
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: #d8b56f;
@@ -776,14 +780,14 @@ body {
 
 .juice-banner h2 {
   font-family: "Cormorant Garamond", Georgia, serif;
-  font-size: 52px;
+  font-size: 76px;
   font-weight: 600;
   line-height: 0.92;
-  margin: 6px 0 8px;
+  margin: 8px 0 12px;
 }
 
 .juice-meta {
-  font-size: 14px;
+  font-size: 18px;
   color: #d2cbbd;
 }
 
@@ -792,7 +796,7 @@ body {
 }
 
 .juice-next {
-  margin-top: 10px;
+  margin-top: 14px;
 }
 
 .juice-action {

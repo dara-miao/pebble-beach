@@ -119,10 +119,13 @@ describe("juice overlay", () => {
     expect(el.textContent).toMatch(/Nice/i);
     expect(el.querySelector(".juice-toast")).toBeTruthy();
 
-    renderJuice(el, holeOutBeatFrom({ holeNumber: 7, strokes: 2 }, 3, "E"));
+    const onSkip = vi.fn();
+    renderJuice(el, holeOutBeatFrom({ holeNumber: 7, strokes: 2 }, 3, "E"), { onSkip });
     expect(el.textContent).toMatch(/Birdie/i);
     expect(el.textContent).toMatch(/Hole 7/);
     expect(el.textContent).toMatch(/hole 8/i);
+    el.querySelector<HTMLElement>(".juice-banner")!.click();
+    expect(onSkip).toHaveBeenCalled();
 
     const onNewRound = vi.fn();
     renderJuice(el, holeOutBeatFrom({ holeNumber: 18, strokes: 5 }, 5, "E"), { onNewRound });
