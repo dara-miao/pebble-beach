@@ -71,10 +71,19 @@ const TEE_LABELS: Record<TeeSet, string> = {
 };
 
 const TEE_ORDER: TeeSet[] = ["championship", "blue", "gold", "white"];
+const CAM_ORDER: { id: CameraMode; label: string }[] = [
+  { id: "address", label: "Stand" },
+  { id: "tee", label: "Tee" },
+  { id: "flyover", label: "Fly" },
+  { id: "green", label: "Green" },
+  { id: "overview", label: "Course" },
+];
+
+let moreOpen = true;
 
 export function renderHud(
   el: HTMLElement,
-  course: CourseData,
+  _course: CourseData,
   hole: HoleData,
   state: HudState,
   play: PlayHudView,
@@ -84,54 +93,94 @@ export function renderHud(
 ): void {
   const yards = hole.yards[state.tee];
   const holes = Array.from({ length: 18 }, (_, i) => i + 1);
-  const teeName = course.scorecard[state.tee]?.name ?? TEE_LABELS[state.tee];
   const chips = shotChips(play);
-  const placeholder = play.suggestion.prompt;
+  const leftover = play.holed ? "Holed" : play.leftoverLabel.replace(" to pin", "");
+  const now = play.holed ? `Holed in ${play.strokes}` : `Shot ${play.strokes + 1}`;
+  const prevHole = hole.number === 1 ? 18 : hole.number - 1;
+  const nextHole = hole.number === 18 ? 1 : hole.number + 1;
+  const windIdx = Math.max(0, WIND_FROM.indexOf(play.wind.from));
+  const prevWind = WIND_FROM[(windIdx + WIND_FROM.length - 1) % WIND_FROM.length];
+  const nextWind = WIND_FROM[(windIdx + 1) % WIND_FROM.length];
 
   el.innerHTML = `
-    <div class="hud-scroll">
-      <div class="panel brand">
-        <p class="kicker">${course.location}</p>
-        <h1>${course.name}</h1>
-        <div class="meta">
-          <span>Par ${course.par}</span>
-          <span class="dot"></span>
-          <span>${course.scorecard[state.tee].total.toLocaleString()} yds</span>
-          <span class="dot"></span>
-          <span>${teeName}</span>
+    <div class="panel play">
+      <div class="play-top">
+        <div class="hole-num">
+          <span>Hole</span>
+          <strong>${hole.number}</strong>
         </div>
+        <div class="play-copy">
+          <p class="play-line">Par ${hole.par} · ${yards} · ${TEE_LABELS[state.tee]}</p>
+          <p class="play-line now">${now} · <b class="lie-badge lie-${play.lie}">${play.lieLabel}</b> · <b class="left-read">${leftover}</b></p>
+          <p class="play-line mute">${play.thru.label}${play.thru.played ? ` · ${play.thru.strokes} thru ${play.thru.played}` : ""} · ${play.windOnShot}</p>
+        </div>
+        <button type="button" class="more-toggle ${moreOpen ? "on" : ""}" data-more>${moreOpen ? "Close" : "Show"}</button>
       </div>
 
-      <div class="panel hole">
-        <div class="hole-head">
-          <div class="hole-num">
-            <span>Hole</span>
-            <strong>${hole.number}</strong>
-          </div>
-          <div class="stats">
-            <div><em>Par</em><b>${hole.par}</b></div>
-            <div><em>Yards</em><b>${yards}</b></div>
-            <div><em>HCP</em><b>${hole.handicap}</b></div>
-          </div>
-        </div>
-        <p class="note">${hole.note}</p>
-        <div class="play-status">
-          <div class="play-stat">
-            <em>Now</em>
-            <b>${play.holed ? `Holed in ${play.strokes}` : `Shot ${play.strokes + 1}`}</b>
-          </div>
-          <div class="play-stat">
-            <em>Lie</em>
-            <b class="lie-badge lie-${play.lie}">${play.lieLabel}</b>
-          </div>
-          <div class="play-stat">
-            <em>Left</em>
-            <b>${play.holed ? "Holed" : play.leftoverLabel.replace(" to pin", "")}</b>
-          </div>
-        </div>
-        ${shotListHtml(play)}
+      <form class="shot-form">
+        <input
+          name="prompt"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="${play.suggestion.prompt}"
+          value="${escapeAttr(draft)}"
+          ${play.holed ? "disabled" : ""}
+        />
+        <button type="submit" ${play.holed ? "disabled" : ""}>Hit</button>
+      </form>
+      <div class="chips">
+        ${chips.map((c) => `<button type="button" data-ex="${escapeAttr(c.prompt)}">${c.label}</button>`).join("")}
       </div>
+      <div class="shot-panel">${shotPanelHtml(shot, play)}</div>
 
+      <div class="play-tools">
+        <button type="button" data-hole="${prevHole}" aria-label="Previous hole">‹</button>
+        <button type="button" data-hole="${nextHole}" aria-label="Next hole">›</button>
+        <div class="seg cam-seg">
+          ${CAM_ORDER.map(
+            (c) =>
+              `<button type="button" data-cam="${c.id}" class="${state.camera === c.id ? "on" : ""}">${c.label}</button>`,
+          ).join("")}
+        </div>
+      </div>
+      <div class="wind-compact">
+        <button type="button" data-wind-from="${prevWind}">‹</button>
+        <b class="wind-from-read">${play.wind.from}</b>
+        <button type="button" data-wind-from="${nextWind}">›</button>
+        <button type="button" data-wind-mph-delta="-2" ${play.wind.mph <= 0 ? "disabled" : ""}>−</button>
+        <b class="wind-mph-read">${play.wind.mph === 0 ? "Still" : `${play.wind.mph}`}</b>
+        <button type="button" data-wind-mph-delta="2" ${play.wind.mph >= 32 ? "disabled" : ""}>+</button>
+      </div>
+    </div>
+
+    <div class="panel more ${moreOpen ? "open" : ""}" ${moreOpen ? "" : "hidden"}>
+      <div class="control-block">
+        <span class="label">Tees</span>
+        <div class="seg tee-seg">
+          ${TEE_ORDER.map(
+            (t) =>
+              `<button type="button" data-tee="${t}" class="tee-${t} ${state.tee === t ? "on" : ""}">${TEE_LABELS[t]}</button>`,
+          ).join("")}
+        </div>
+      </div>
+      <div class="control-block">
+        <span class="label">Wind</span>
+        <div class="seg wind-seg">
+          ${WIND_FROM.map(
+            (d) =>
+              `<button type="button" data-wind-from="${d}" class="${play.wind.from === d ? "on" : ""}">${d}</button>`,
+          ).join("")}
+        </div>
+        <div class="wind-mph">
+          ${[0, 8, 14, 20]
+            .map(
+              (n) =>
+                `<button type="button" data-wind-mph="${n}" class="${play.wind.mph === n ? "on" : ""}">${n === 0 ? "0" : n}</button>`,
+            )
+            .join("")}
+        </div>
+      </div>
       <nav class="holes">
         ${holes
           .map((n) => {
@@ -142,89 +191,13 @@ export function renderHud(
           .join("")}
       </nav>
       ${scorecardHtml(play, hole.number)}
-
-      <div class="panel controls">
-        <div class="control-block">
-          <span class="label">Tees</span>
-          <div class="seg tee-seg">
-            ${TEE_ORDER.map(
-              (t) =>
-                `<button type="button" data-tee="${t}" class="tee-${t} ${state.tee === t ? "on" : ""}">${TEE_LABELS[t]}</button>`,
-            ).join("")}
-          </div>
-        </div>
-        <div class="control-block">
-          <span class="label">Camera</span>
-          <div class="seg cam-seg">
-            <button type="button" data-cam="address" class="${state.camera === "address" ? "on" : ""}">Stand</button>
-            <button type="button" data-cam="tee" class="${state.camera === "tee" ? "on" : ""}">Tee</button>
-            <button type="button" data-cam="flyover" class="${state.camera === "flyover" ? "on" : ""}">Fly</button>
-            <button type="button" data-cam="green" class="${state.camera === "green" ? "on" : ""}">Green</button>
-            <button type="button" data-cam="overview" class="${state.camera === "overview" ? "on" : ""}">Course</button>
-          </div>
-        </div>
-        <div class="control-block">
-          <span class="label">Wind</span>
-          <div class="seg wind-seg">
-            ${WIND_FROM.map(
-              (d) =>
-                `<button type="button" data-wind-from="${d}" class="${play.wind.from === d ? "on" : ""}">${d}</button>`,
-            ).join("")}
-          </div>
-          <div class="wind-mph">
-            <button type="button" data-wind-mph-delta="-2" ${play.wind.mph <= 0 ? "disabled" : ""}>−</button>
-            <b>${play.wind.mph === 0 ? "Still" : `${play.wind.mph} mph`}</b>
-            <button type="button" data-wind-mph-delta="2" ${play.wind.mph >= 32 ? "disabled" : ""}>+</button>
-            ${[0, 8, 14, 20]
-              .map(
-                (n) =>
-                  `<button type="button" data-wind-mph="${n}" class="${play.wind.mph === n ? "on" : ""}">${n === 0 ? "0" : n}</button>`,
-              )
-              .join("")}
-          </div>
-          <p class="wind-on-shot">${play.windOnShot}</p>
-        </div>
+      ${shotListHtml(play)}
+      <canvas class="mini" width="340" height="140"></canvas>
+      <ul class="book-list">${bookListHtml(play, shot, yards)}</ul>
+      <div class="shot-actions">
+        <button type="button" class="reset" data-reset>Reset hole</button>
+        <button type="button" class="reset" data-new-round>New round</button>
       </div>
-
-      <div class="panel book">
-        <div class="book-head">
-          <h2>From here</h2>
-        </div>
-        <canvas class="mini" width="340" height="140"></canvas>
-        <ul class="book-list">
-          ${bookListHtml(play, shot, yards)}
-        </ul>
-      </div>
-
-      <p class="hint">Stand looks down the line · click to aim · miss envelope is the slight miss · ${play.suggestion.label} · r resets hole</p>
-    </div>
-
-    <div class="panel shot">
-      <div class="shot-head">
-        <h2>Call your shot</h2>
-        <div class="shot-actions">
-          <button type="button" class="reset" data-reset>Reset hole</button>
-          <button type="button" class="reset" data-new-round>New round</button>
-        </div>
-      </div>
-      <form class="shot-form">
-        <input
-          name="prompt"
-          type="text"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="${placeholder}"
-          value="${escapeAttr(draft)}"
-          ${play.holed ? "disabled" : ""}
-        />
-        <button type="submit" ${play.holed ? "disabled" : ""}>Hit</button>
-      </form>
-      <div class="chips">
-        ${chips
-          .map((c) => `<button type="button" data-ex="${escapeAttr(c.prompt)}">${c.label}</button>`)
-          .join("")}
-      </div>
-      <div class="shot-panel">${shotPanelHtml(shot, play)}</div>
     </div>
   `;
 
@@ -256,6 +229,19 @@ export function renderHud(
   el.querySelectorAll<HTMLButtonElement>("[data-wind-mph-delta]").forEach((btn) => {
     btn.onclick = () => handlers.onWind({ mph: play.wind.mph + Number(btn.dataset.windMphDelta) });
   });
+  el.querySelector<HTMLButtonElement>("[data-more]")!.onclick = () => {
+    moreOpen = !moreOpen;
+    const drawer = el.querySelector(".panel.more");
+    const toggle = el.querySelector<HTMLButtonElement>("[data-more]");
+    if (drawer) {
+      drawer.classList.toggle("open", moreOpen);
+      drawer.toggleAttribute("hidden", !moreOpen);
+    }
+    if (toggle) {
+      toggle.classList.toggle("on", moreOpen);
+      toggle.textContent = moreOpen ? "Close" : "Show";
+    }
+  };
 
   const form = el.querySelector<HTMLFormElement>(".shot-form");
   const input = el.querySelector<HTMLInputElement>("input[name=prompt]");
@@ -282,26 +268,28 @@ export function updateShotPanel(
   if (panel) panel.innerHTML = shotPanelHtml(shot, play);
   const mini = el.querySelector<HTMLCanvasElement>(".mini");
   if (mini) drawMinimap(mini, hole, play.ball, shot);
-  const left = el.querySelector(".play-status .play-stat:nth-child(3) b");
+  const left = el.querySelector(".left-read");
   if (left) left.textContent = play.holed ? "Holed" : play.leftoverLabel.replace(" to pin", "");
   const book = el.querySelector(".book-list");
   if (book) book.innerHTML = bookListHtml(play, shot, play.cardYards);
-  const windLine = el.querySelector(".wind-on-shot");
-  if (windLine) windLine.textContent = play.windOnShot;
-  const windMph = el.querySelector(".wind-mph b");
-  if (windMph) windMph.textContent = play.wind.mph === 0 ? "Still" : `${play.wind.mph} mph`;
-  const hint = el.querySelector(".hint");
-  if (hint) hint.textContent = `Stand looks down the line · click to aim · miss envelope is the slight miss · ${play.suggestion.label} · r resets hole`;
+  const windLine = el.querySelector(".play-line.mute");
+  if (windLine) {
+    windLine.textContent = `${play.thru.label}${play.thru.played ? ` · ${play.thru.strokes} thru ${play.thru.played}` : ""} · ${play.windOnShot}`;
+  }
+  const windMph = el.querySelector(".wind-mph-read");
+  if (windMph) windMph.textContent = play.wind.mph === 0 ? "Still" : `${play.wind.mph}`;
+  const windFrom = el.querySelector(".wind-from-read");
+  if (windFrom) windFrom.textContent = play.wind.from;
 }
 
 function shotPanelHtml(shot: ShotHudInfo | undefined, play: PlayHudView): string {
   if (play.holed) {
     const pen = play.penalties ? ` (${play.penalties} penalty)` : "";
-    const next = play.holeNumber >= 18 ? "Round complete. New round to play again." : "Next tee shortly — or reset this hole.";
+    const next = play.holeNumber >= 18 ? "Round complete. New round to play again." : "Next tee shortly, or reset this hole.";
     return `<p class="idle">Holed out in ${play.strokes}${pen}. ${next}</p>`;
   }
   if (!shot?.outcome) {
-    return `<p class="idle">Type a club and yards. Preview is the real flight — carry, roll, leftover, and trouble — before you Hit.</p>`;
+    return `<p class="idle">Club and yards, then Hit. Preview is the real flight.</p>`;
   }
   const kind = shot.kind === "preview" ? "preview" : "result";
   const label = kind === "preview" ? "Preview" : "Result";
@@ -338,7 +326,7 @@ function scorecardHtml(play: PlayHudView, currentHole: number): string {
         .join("")}<span>${strokes}</span></div>
     </div>`;
   };
-  return `<div class="panel scorecard">
+  return `<div class="scorecard">
     ${row(front, "Out")}
     ${row(back, "In")}
     <p class="round-line">Round <b>${play.thru.label}</b>${play.thru.played ? ` · ${play.thru.strokes} thru ${play.thru.played}` : ""} · par ${play.thru.played ? play.thru.par : "—"}</p>

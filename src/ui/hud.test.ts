@@ -65,12 +65,16 @@ describe("HUD control wiring", () => {
     el.querySelector<HTMLButtonElement>("[data-new-round]")!.click();
     expect(onNewRound).toHaveBeenCalled();
 
-    const shotBar = el.querySelector(".panel.shot");
+    const playBar = el.querySelector(".panel.play");
     const form = el.querySelector<HTMLFormElement>(".shot-form")!;
-    expect(shotBar).toBeTruthy();
-    expect(el.querySelector(".hud-scroll")).toBeTruthy();
-    expect(el.querySelector(".hud-scroll .shot-form")).toBeNull();
-    expect(shotBar!.contains(form)).toBe(true);
+    expect(playBar).toBeTruthy();
+    expect(el.querySelector(".hud-scroll")).toBeNull();
+    expect(playBar!.contains(form)).toBe(true);
+    expect(el.querySelector(".panel.more")?.hasAttribute("hidden")).toBe(false);
+    expect(el.querySelector("[data-more]")?.textContent).toBe("Close");
+    el.querySelector<HTMLButtonElement>("[data-more]")!.click();
+    expect(el.querySelector(".panel.more")?.hasAttribute("hidden")).toBe(true);
+    expect(el.querySelector("[data-more]")?.textContent).toBe("Show");
 
     const chips = el.querySelectorAll<HTMLButtonElement>("[data-ex]");
     expect(chips.length).toBe(shotChips(s.playView()).length);
@@ -126,7 +130,7 @@ describe("HUD control wiring", () => {
       leftover: 40,
       leftoverLabel: "40 yds",
     });
-    const panel = el.querySelector(".panel.shot .shot-panel");
+    const panel = el.querySelector(".panel.play .shot-panel");
     expect(panel?.textContent).toMatch(/Preview/);
     expect(panel?.textContent).toMatch(/Fairway/);
   });
