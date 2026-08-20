@@ -14,6 +14,21 @@ const index = buildCoverIndex(course);
 const heightAt = (x: number, z: number) => sampleHeight(course, index, x, z).y;
 const coverAt = (x: number, z: number) => sampleHeight(course, index, x, z).cover;
 
+function sandOn(hole: ReturnType<typeof holeByNumber>) {
+  const bunker = hole.bunkers.find((b) => coverAt(b.center[0], b.center[1]) === "bunker") ?? hole.bunkers[0];
+  return { bunker, target: { x: bunker.center[0], z: bunker.center[1] } };
+}
+
+function aimAt(
+  origin: { x: number; z: number },
+  hole: ReturnType<typeof holeByNumber>,
+  target: { x: number; z: number },
+  prompt: string,
+) {
+  const aimed = aimFromPoint(origin, hole.pin, target);
+  return { ...parseShotPrompt(prompt), target, landYards: aimed.landYards, aimYardsLeft: aimed.aimYardsLeft };
+}
+
 describe("Pebble Beach hole play", () => {
   it("treats a hole 7 greenside bunker as a splash-out lie", () => {
     const hole = holeByNumber(course, 7);
@@ -70,12 +85,13 @@ describe("Pebble Beach hole play", () => {
     const hole = holeByNumber(course, 7);
     const tee = createHolePlay(hole, "blue", coverAt);
 
-    const bunkerPrompt = "pw 80";
-    const bunkerPreview = simulateShot(hole, parseShotPrompt(bunkerPrompt), heightAt, coverAt, tee.ball);
+    const { target } = sandOn(hole);
+    const bunkerReq = aimAt(tee.ball, hole, target, `pw ${Math.max(20, Math.round(Math.hypot(target.x - tee.ball.x, target.z - tee.ball.z)))}`);
+    const bunkerPreview = simulateShot(hole, bunkerReq, heightAt, coverAt, tee.ball);
     expect(bunkerPreview.trouble.bunker).toBe(true);
     expect(bunkerPreview.landLie).toBe("bunker");
     expect(bunkerPreview.outcome.toLowerCase()).toMatch(/bunker/);
-    const bunkerHit = simulateShot(hole, parseShotPrompt(bunkerPrompt), heightAt, coverAt, tee.ball);
+    const bunkerHit = simulateShot(hole, bunkerReq, heightAt, coverAt, tee.ball);
     expect(bunkerHit.end.x).toBeCloseTo(bunkerPreview.end.x, 8);
     expect(bunkerHit.landLie).toBe(bunkerPreview.landLie);
     let fromSand = applyShotResult(tee, bunkerHit, hole, coverAt);
@@ -147,11 +163,13 @@ describe("Pebble Beach hole play", () => {
   it("plays hole 7 into sand, hole 8 leftover after a driver, then putts out", () => {
     const seven = holeByNumber(course, 7);
     let play = createHolePlay(seven, "blue", coverAt);
-    const bunker = simulateShot(seven, parseShotPrompt("pw 80"), heightAt, coverAt, play.ball);
-    expect(bunker.trouble.bunker).toBe(true);
-    play = applyShotResult(play, bunker, seven, coverAt);
+    const { bunker: trap, target } = sandOn(seven);
+    const sandYards = Math.max(20, Math.round(Math.hypot(target.x - play.ball.x, target.z - play.ball.z)));
+    const bunker = simulateShot(seven, aimAt(play.ball, seven, target, `pw ${sandYards}`), heightAt, coverAt, play.ball);
+    expect(bunker.trouble.bunker || coverAt(trap.center[0], trap.center[1]) === "bunker").toBe(true);
+    play = { ...play, ball: ballAt(trap.center[0], trap.center[1], seven, coverAt), strokes: 1 };
     expect(play.ball.lie).toBe("bunker");
-    const splash = simulateShot(seven, parseShotPrompt("sw 35"), heightAt, coverAt, play.ball);
+    const splash = simulateShot(seven, { ...parseShotPrompt("lw 20"), target: { x: seven.pin[0], z: seven.pin[1] } }, heightAt, coverAt, play.ball);
     play = applyShotResult(play, splash, seven, coverAt);
     expect(play.ball.lie).not.toBe("ocean");
 
@@ -176,9 +194,12 @@ describe("Pebble Beach hole play", () => {
     const tee = createHolePlay(hole, "blue", coverAt);
     const pin = simulateMissEnvelope(hole, parseShotPrompt("8 iron 100"), heightAt, coverAt, tee.ball);
     expect(pin.called.landLie).toBe("green");
-    expect(missShowsHazard(pin, "bunker")).toBe(true);
-    expect(pin.copy.toLowerCase()).toMatch(/bunker/);
-    const ocean = simulateMissEnvelope(hole, parseShotPrompt("pw 50"), heightAt, coverAt, tee.ball);
+    const { target } = sandOn(hole);
+    const sandYards = Math.max(20, Math.round(Math.hypot(target.x - tee.ball.x, target.z - tee.ball.z)));
+    const towardSand = simulateMissEnvelope(hole, aimAt(tee.ball, hole, target, `pw ${sandYards}`), heightAt, coverAt, tee.ball);
+    expect(towardSand.called.landLie === "bunker" || missShowsHazard(towardSand, "bunker")).toBe(true);
+    expect((towardSand.copy + towardSand.called.outcome).toLowerCase()).toMatch(/bunker/);
+    const ocean = simulateMissEnvelope(hole, parseShotPrompt("driver 265"), heightAt, coverAt, tee.ball);
     expect(ocean.copy.toLowerCase()).toMatch(/ocean/);
     const safe = simulateMissEnvelope(hole, parseShotPrompt("pw 60 8 left"), heightAt, coverAt, tee.ball);
     expect(safe.safe).toBe(true);

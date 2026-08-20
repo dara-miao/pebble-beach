@@ -76,6 +76,10 @@ const CLUB_ALIASES: Record<string, Club> = {
   lob: "lw",
   putter: "putter",
   putt: "putter",
+  "1 wood": "driver",
+  "gap wedge": "gw",
+  "lob wedge": "lw",
+  "3 hybrid": "hybrid",
 };
 
 const CLUB_CARRY: Record<Club, number> = {
@@ -96,22 +100,47 @@ const CLUB_CARRY: Record<Club, number> = {
   putter: 25,
 };
 
+export interface ShotParseFallback {
+  club?: Club;
+  carryYards?: number;
+}
+
 function take(work: string, re: RegExp): { work: string; match: RegExpMatchArray | null } {
   const match = work.match(re);
   return { work: match ? work.replace(match[0], " ") : work, match };
 }
 
-export function parseShotPrompt(raw: string): ShotRequest {
-  const text = raw.trim().toLowerCase();
-  let club: Club = "7iron";
+const CLUB_KEYS = Object.keys(CLUB_ALIASES).sort((a, b) => b.length - a.length);
 
-  const ordered = Object.keys(CLUB_ALIASES).sort((a, b) => b.length - a.length);
-  for (const key of ordered) {
-    if (text.includes(key)) {
-      club = CLUB_ALIASES[key];
-      break;
-    }
+function matchClub(text: string): Club | undefined {
+  for (const key of CLUB_KEYS) {
+    const body = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+    const re = new RegExp(`(?:^|[^a-z0-9])${body}(?![a-z])`);
+    if (re.test(text)) return CLUB_ALIASES[key];
   }
+  return undefined;
+}
+
+function impliedClub(text: string): Club | undefined {
+  if (/\bbomb(?:\s+it)?\b|\bnuke\b|\bsmash\b|\bhit it hard\b/.test(text)) return "driver";
+  if (/\bpunch\b/.test(text)) return "8iron";
+  return undefined;
+}
+
+function finiteNumber(value: number, fallback: number): number {
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function clampCarry(club: Club, yards: number): number {
+  const n = finiteNumber(yards, CLUB_CARRY[club]);
+  return club === "putter" ? Math.max(0.6, Math.min(80, n)) : Math.max(15, Math.min(320, n));
+}
+
+export function parseShotPrompt(raw: string | null | undefined, fallback?: ShotParseFallback): ShotRequest {
+  const rawText = raw == null ? "" : String(raw);
+  const text = rawText.trim().toLowerCase();
+  const namedClub = matchClub(text);
+  const club: Club = namedClub ?? impliedClub(text) ?? fallback?.club ?? "7iron";
 
   let shape: Shape = "straight";
   if (/\bhook\b/.test(text)) shape = "hook";
@@ -141,15 +170,41 @@ export function parseShotPrompt(raw: string): ShotRequest {
   work = from.work;
   if (from.match && landYards == null) landYards = Number(from.match[1]);
 
+  work = work
+    .replace(/\d{1,2}\s*mph/g, " ")
+    .replace(/\binto(?:\s+the)?\s+wind\b/g, " ")
+    .replace(/\bdownwind\b/g, " ")
+    .replace(/\boff the (?:left|right)\b/g, " ")
+    .replace(/\bfrom the (?:left|right)\b/g, " ")
+    .replace(/\b(?:left|right)[- ]to[- ](?:left|right)\b/g, " ");
+
   let carryYards = CLUB_CARRY[club];
+  let foundYards = false;
+  const onlySignedNumber = /^\s*-[\d.]+\s*$/.test(text);
   if (club === "putter") {
     const ft = work.match(/(\d{1,3})\s*(?:ft|feet)\b/);
-    const yds = work.match(/(\d{1,3})\s*(?:yds?|yards?)\b/) || work.match(/putt(?:er)?\s+(\d{1,3})\b/) || work.match(/\b(\d{1,3})\b/);
-    if (ft) carryYards = Number(ft[1]) / 3;
-    else if (yds) carryYards = Number(yds[1]);
-  } else {
-    const yardMatch = work.match(/(\d{2,3})\s*(?:yds?|yards?)?/);
-    if (yardMatch) carryYards = Number(yardMatch[1]);
+    const yds = work.match(/(\d{1,3})\s*(?:yds?|yards?)\b/);
+    const bare = work.match(/putt(?:er)?\s+(\d{1,3})\b/) || work.match(/\b(\d{1,3})\b/);
+    if (ft) {
+      carryYards = Number(ft[1]) / 3;
+      foundYards = true;
+    } else if (yds) {
+      carryYards = Number(yds[1]);
+      foundYards = true;
+    } else if (bare && !onlySignedNumber) {
+      carryYards = Number(bare[1]) / 3;
+      foundYards = true;
+    }
+  } else if (!onlySignedNumber) {
+    const yardMatch = work.match(/(?<![-\d])(\d{2,3})\s*(?:yds?|yards?)?/);
+    if (yardMatch) {
+      carryYards = Number(yardMatch[1]);
+      foundYards = true;
+    }
+  }
+
+  if (!foundYards && !namedClub && !impliedClub(text) && fallback?.carryYards != null && Number.isFinite(fallback.carryYards)) {
+    carryYards = fallback.carryYards;
   }
 
   let windMph = 0;
@@ -165,31 +220,33 @@ export function parseShotPrompt(raw: string): ShotRequest {
 
   if (/\boff the right\b|\bfrom the right\b|\bright[- ]to[- ]left\b/.test(text)) {
     windFromLeft = false;
+    if (!mphMatch && windMph === 0) windMph = 10;
   }
   if (/\boff the left\b|\bfrom the left\b|\bleft[- ]to[- ]right\b/.test(text)) {
     windFromLeft = true;
+    if (!mphMatch && windMph === 0) windMph = 10;
   }
 
   if (/\bdownwind\b/.test(text)) windMph = -Math.abs(windMph || 10);
 
-  const clamped =
-    club === "putter" ? Math.max(0.6, Math.min(80, carryYards)) : Math.max(15, Math.min(320, carryYards));
+  const resolvedClub = namedClub || impliedClub(text) || (foundYards ? clubForYards(carryYards) : club);
+  const clamped = clampCarry(resolvedClub, carryYards);
 
   return {
-    raw,
-    club,
+    raw: rawText,
+    club: resolvedClub,
     carryYards: clamped,
     shape,
-    windMph,
+    windMph: finiteNumber(windMph, 0),
     windFromLeft,
     startYards: landYards,
-    aimYardsLeft,
-    landYards,
+    aimYardsLeft: finiteNumber(aimYardsLeft, 0),
+    landYards: landYards != null && Number.isFinite(landYards) ? landYards : undefined,
   };
 }
 
-export function promptSpecifiesAim(raw: string): boolean {
-  const text = raw.trim().toLowerCase();
+export function promptSpecifiesAim(raw: string | null | undefined): boolean {
+  const text = raw == null ? "" : String(raw).trim().toLowerCase();
   return (
     /(?:aim\s+)?\d{1,2}\s*(?:yds?|yards?)?\s*(left|right)(?:\s+of(?:\s+the)?\s+pin)?\b/.test(text) ||
     /\baim\s+(left|right)\b/.test(text) ||
