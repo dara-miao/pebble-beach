@@ -3,7 +3,7 @@ import type { JuiceBeat } from "../shot/juice";
 export function renderJuice(
   el: HTMLElement,
   beat: JuiceBeat | null,
-  handlers: { onNewRound?: () => void } = {},
+  handlers: { onNewRound?: () => void; onSkip?: () => void } = {},
 ): void {
   if (!beat) {
     el.hidden = true;
@@ -43,6 +43,11 @@ export function renderJuice(
 
   const btn = el.querySelector<HTMLButtonElement>("[data-juice-new-round]");
   if (btn && handlers.onNewRound) btn.onclick = () => handlers.onNewRound?.();
+
+  const banner = el.querySelector<HTMLElement>(".juice-banner");
+  if (banner && handlers.onSkip && beat.kind === "hole-out") {
+    banner.addEventListener("click", () => handlers.onSkip?.());
+  }
 }
 
 function escapeText(value: string): string {
