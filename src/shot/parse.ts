@@ -24,7 +24,12 @@ export interface ShotRequest {
   shape: Shape;
   windMph: number;
   windFromLeft: boolean;
+  /** @deprecated kept for older prompts; treated as a landing-target distance */
   startYards?: number;
+  /** Yards left of the pin line (negative = right). Shape is relative to this aim. */
+  aimYardsLeft: number;
+  /** Optional landing target, yards from the ball along the pin line. */
+  landYards?: number;
 }
 
 const CLUB_ALIASES: Record<string, Club> = {
@@ -89,6 +94,11 @@ const CLUB_CARRY: Record<Club, number> = {
   putter: 25,
 };
 
+function take(work: string, re: RegExp): { work: string; match: RegExpMatchArray | null } {
+  const match = work.match(re);
+  return { work: match ? work.replace(match[0], " ") : work, match };
+}
+
 export function parseShotPrompt(raw: string): ShotRequest {
   const text = raw.trim().toLowerCase();
   let club: Club = "7iron";
@@ -109,8 +119,36 @@ export function parseShotPrompt(raw: string): ShotRequest {
   else if (/\bslight draw\b/.test(text)) shape = "draw";
   else if (/\bslight fade\b/.test(text)) shape = "fade";
 
-  const yardMatch = text.match(/(\d{2,3})\s*(?:yds?|yards?)?/);
-  const carryYards = yardMatch ? Number(yardMatch[1]) : CLUB_CARRY[club];
+  let work = text;
+  let aimYardsLeft = 0;
+  const aimNum = take(work, /(?:aim\s+)?(\d{1,2})\s*(?:yds?|yards?)?\s*(left|right)(?:\s+of(?:\s+the)?\s+pin)?\b/);
+  work = aimNum.work;
+  if (aimNum.match) {
+    aimYardsLeft = Number(aimNum.match[1]) * (aimNum.match[2] === "left" ? 1 : -1);
+  } else {
+    const aimWord = take(work, /\baim\s+(left|right)\b/);
+    work = aimWord.work;
+    if (aimWord.match) aimYardsLeft = aimWord.match[1] === "left" ? 10 : -10;
+  }
+
+  let landYards: number | undefined;
+  const land = take(work, /\b(?:land(?:ing)?|target|at)\s+(\d{2,3})\s*(?:yds?|yards?)?\s*(?:out)?\b/);
+  work = land.work;
+  if (land.match) landYards = Number(land.match[1]);
+  const from = take(work, /\bfrom\s+(\d{2,3})\s*(?:yds?|yards?)?\s*(?:out)?\b/);
+  work = from.work;
+  if (from.match && landYards == null) landYards = Number(from.match[1]);
+
+  let carryYards = CLUB_CARRY[club];
+  if (club === "putter") {
+    const ft = work.match(/(\d{1,3})\s*(?:ft|feet)\b/);
+    const yds = work.match(/(\d{1,3})\s*(?:yds?|yards?)\b/) || work.match(/putt(?:er)?\s+(\d{1,3})\b/) || work.match(/\b(\d{1,3})\b/);
+    if (ft) carryYards = Number(ft[1]) / 3;
+    else if (yds) carryYards = Number(yds[1]);
+  } else {
+    const yardMatch = work.match(/(\d{2,3})\s*(?:yds?|yards?)?/);
+    if (yardMatch) carryYards = Number(yardMatch[1]);
+  }
 
   let windMph = 0;
   let windFromLeft = true;
@@ -130,20 +168,21 @@ export function parseShotPrompt(raw: string): ShotRequest {
     windFromLeft = true;
   }
 
-  const startMatch = text.match(/(?:from|at)\s+(\d{2,3})\s*(?:yds?|yards?)?\s*(?:out)?/);
-  const startYards = startMatch ? Number(startMatch[1]) : undefined;
-
-  // If user said downwind, encode as negative windMph for carry boost in sim.
   if (/\bdownwind\b/.test(text)) windMph = -Math.abs(windMph || 10);
+
+  const clamped =
+    club === "putter" ? Math.max(0.6, Math.min(80, carryYards)) : Math.max(15, Math.min(320, carryYards));
 
   return {
     raw,
     club,
-    carryYards: Math.max(15, Math.min(320, carryYards)),
+    carryYards: clamped,
     shape,
     windMph,
     windFromLeft,
-    startYards,
+    startYards: landYards,
+    aimYardsLeft,
+    landYards,
   };
 }
 
@@ -155,7 +194,14 @@ export function describeShot(req: ShotRequest, fromLie?: string): string {
         ? `${Math.abs(req.windMph)} mph downwind`
         : `${req.windMph} mph ${req.windFromLeft ? "off the left" : "off the right"}`;
   const lie = fromLie ? ` · from ${fromLie}` : "";
-  return `${req.club} · ${req.carryYards} yds · ${req.shape} · ${wind}${lie}`;
+  const aim =
+    req.aimYardsLeft === 0
+      ? req.landYards != null
+        ? ` · land ${Math.round(req.landYards)}`
+        : ""
+      : ` · ${Math.abs(req.aimYardsLeft)} ${req.aimYardsLeft > 0 ? "left" : "right"} of pin`;
+  const dist = req.club === "putter" && req.carryYards < 20 ? `${Math.round(req.carryYards * 3)} ft` : `${req.carryYards} yds`;
+  return `${req.club} · ${dist} · ${req.shape} · ${wind}${aim}${lie}`;
 }
 
 export function clubForYards(yards: number): Club {

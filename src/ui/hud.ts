@@ -12,11 +12,15 @@ export interface ShotHudInfo {
   summary?: string;
   outcome?: string;
   carry?: number;
+  roll?: number;
   total?: number;
   peak?: number;
   leftover?: number;
+  leftoverLabel?: string;
   landLie?: string;
   kind?: "preview" | "result";
+  trouble?: string;
+  land?: Vec2;
 }
 
 export interface PlayHudView {
@@ -26,6 +30,7 @@ export interface PlayHudView {
   lieLabel: string;
   remainingYards: number;
   pinYards: number;
+  leftoverLabel: string;
   holed: boolean;
   onTee: boolean;
   ball: Vec2;
@@ -101,7 +106,7 @@ export function renderHud(
         </div>
         <div class="play-stat">
           <em>Left</em>
-          <b>${play.holed ? "—" : `${Math.round(play.remainingYards)}`}</b>
+          <b>${play.holed ? "Holed" : play.leftoverLabel.replace(" to pin", "")}</b>
         </div>
       </div>
     </div>
@@ -168,7 +173,7 @@ export function renderHud(
       <canvas class="mini" width="340" height="140"></canvas>
       <ul>
         <li><span>Scorecard</span><b>${yards} yds</b></li>
-        <li><span>To pin</span><b>${play.holed ? "Holed" : `${Math.round(play.pinYards)} yds`}</b></li>
+        <li><span>To pin</span><b>${play.holed ? "Holed" : play.leftoverLabel.replace(" to pin", "")}</b></li>
         <li><span>Ball lie</span><b>${play.lieLabel}</b></li>
         ${
           play.penalties
@@ -185,7 +190,7 @@ export function renderHud(
       </ul>
     </div>
 
-    <p class="hint">Type a shot to preview flight · Hit to play it · r resets the hole · arrows change holes</p>
+    <p class="hint">Type a shot to preview the real flight · aim 10 left / putt 20 ft · Hit to play it · r resets</p>
   `;
 
   el.querySelectorAll<HTMLButtonElement>("[data-hole]").forEach((btn) => {
@@ -233,7 +238,7 @@ export function updateShotPanel(
   const mini = el.querySelector<HTMLCanvasElement>(".mini");
   if (mini) drawMinimap(mini, hole, play.ball, shot);
   const left = el.querySelector(".play-status .play-stat:nth-child(3) b");
-  if (left) left.textContent = play.holed ? "—" : `${Math.round(play.remainingYards)}`;
+  if (left) left.textContent = play.holed ? "Holed" : play.leftoverLabel.replace(" to pin", "");
 }
 
 function shotPanelHtml(shot: ShotHudInfo | undefined, play: PlayHudView): string {
@@ -241,18 +246,19 @@ function shotPanelHtml(shot: ShotHudInfo | undefined, play: PlayHudView): string
     return `<p class="idle">Holed out in ${play.strokes}${play.penalties ? ` (${play.penalties} penalty)` : ""}. Reset the hole to play it again.</p>`;
   }
   if (!shot?.outcome) {
-    return `<p class="idle">Type a club and yards. Preview shows carry, land, and leftover from this lie — Hit keeps the ball there.</p>`;
+    return `<p class="idle">Type a club and yards. Preview is the real flight — carry, roll, leftover, and trouble — before you Hit.</p>`;
   }
   const kind = shot.kind === "preview" ? "preview" : "result";
   const label = kind === "preview" ? "Preview" : "Result";
-  return `<div class="result ${kind}">
-    <p class="summary">${label} · ${shot.summary ?? ""}</p>
+  const hazard = shot.trouble ? ` hazard ${shot.trouble}` : "";
+  return `<div class="result ${kind}${hazard}">
+    <p class="summary"><span class="kind-pill ${kind}">${label}</span> ${shot.summary ?? ""}</p>
     <p class="outcome">${shot.outcome}</p>
     <div class="nums four">
       <div><em>Carry</em><b>${shot.carry}</b></div>
-      <div><em>Total</em><b>${shot.total}</b></div>
+      <div><em>Roll</em><b>${shot.roll ?? Math.max(0, (shot.total ?? 0) - (shot.carry ?? 0))}</b></div>
       <div><em>Peak</em><b>${shot.peak}<small>y</small></b></div>
-      <div><em>Left</em><b>${shot.leftover}</b></div>
+      <div><em>Left</em><b>${shot.leftoverLabel ?? shot.leftover}</b></div>
     </div>
   </div>`;
 }
@@ -273,9 +279,10 @@ function shotChips(play: PlayHudView): { label: string; prompt: string }[] {
     ];
   }
   if (play.lie === "green" || left <= 18) {
+    const feet = Math.max(3, Math.round(play.pinYards * 3));
     return [
-      { label: `putt ${left}`, prompt: `putt ${left}` },
-      { label: "lag putt", prompt: `putt ${Math.max(6, Math.round(left * 0.8))}` },
+      { label: `putt ${feet} ft`, prompt: `putt ${feet} ft` },
+      { label: "lag putt", prompt: `putt ${Math.max(4, Math.round(feet * 0.75))} ft` },
     ];
   }
   if (play.lie === "woods") {
@@ -297,7 +304,7 @@ function shotPlaceholder(play: PlayHudView): string {
   if (play.lie === "bunker" || play.lie === "sand") return "sw 35 splash";
   if (play.lie === "ocean") return "pw 80 after drop";
   if (play.lie === "woods") return "7 iron punch 120";
-  if (play.lie === "green") return `putt ${Math.max(4, Math.round(play.remainingYards))}`;
+  if (play.lie === "green") return `putt ${Math.max(3, Math.round(play.pinYards * 3))} ft`;
   const left = Math.round(play.remainingYards);
   return `${clubForYards(left)} ${left}`;
 }
@@ -310,6 +317,7 @@ function drawMinimap(canvas: HTMLCanvasElement, hole: HoleData, ball: Vec2, shot
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   const extras: Vec2[] = [ball];
+  if (shot?.land) extras.push(shot.land);
   const pts = [...hole.path, hole.greenCenter, hole.tee, ...hole.bunkers.map((b) => b.center), ...extras];
   const xs = pts.map((p) => p[0]);
   const zs = pts.map((p) => p[1]);
@@ -363,6 +371,19 @@ function drawMinimap(canvas: HTMLCanvasElement, hole: HoleData, ball: Vec2, shot
   ctx.fill();
 
   const [bx, by] = map(ball);
+  if (shot?.land) {
+    const [lx, ly] = map(shot.land);
+    ctx.strokeStyle = shot.trouble === "ocean" ? "rgba(62,198,232,0.9)" : shot.trouble === "bunker" ? "rgba(232,197,106,0.9)" : "rgba(154,212,255,0.75)";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(lx, ly);
+    ctx.stroke();
+    ctx.fillStyle = shot.trouble === "ocean" ? "#3ec6e8" : shot.trouble === "bunker" ? "#e8c56a" : "#9ad4ff";
+    ctx.beginPath();
+    ctx.arc(lx, ly, 3.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.fillStyle = shot?.kind === "preview" ? "#9ad4ff" : "#ffe08a";
   ctx.beginPath();
   ctx.arc(bx, by, 4.2, 0, Math.PI * 2);

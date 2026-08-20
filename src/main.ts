@@ -93,6 +93,7 @@ function playView(): PlayHudView {
     lieLabel: lieCopy(play),
     remainingYards: play.ball.remainingYards,
     pinYards: play.ball.pinYards,
+    leftoverLabel: leftoverCopy(play),
     holed: play.ball.holed,
     onTee: play.strokes === 0 && play.ball.lie === "tee",
     ball: [play.ball.x, play.ball.z],
@@ -169,7 +170,19 @@ function simulateFromPrompt(prompt: string) {
     total: result.totalYards,
     peak: result.peakYards,
     leftover: Math.round(result.remainingYards),
+    leftoverLabel: result.leftoverLabel === "Holed" ? "Holed" : result.leftoverLabel.replace(" to pin", ""),
     landLie: lieLabel(result.landLie),
+    roll: result.rollYards,
+    trouble: result.trouble.ocean
+      ? "ocean"
+      : result.trouble.bunker
+        ? "bunker"
+        : result.trouble.woods
+          ? "woods"
+          : result.trouble.shortSided
+            ? "short"
+            : undefined,
+    land: [result.end.x, result.end.z],
   };
   return { req, result, info, origin };
 }
@@ -205,7 +218,19 @@ function resultFromLast(): ShotHudInfo | undefined {
     total: last.totalYards,
     peak: last.peakYards,
     leftover: Math.round(last.remainingYards),
+    leftoverLabel: last.leftoverLabel === "Holed" ? "Holed" : last.leftoverLabel.replace(" to pin", ""),
     landLie: lieLabel(last.landLie),
+    roll: last.rollYards,
+    trouble: last.trouble.ocean
+      ? "ocean"
+      : last.trouble.bunker
+        ? "bunker"
+        : last.trouble.woods
+          ? "woods"
+          : last.trouble.shortSided
+            ? "short"
+            : undefined,
+    land: [last.end.x, last.end.z],
     kind: "result",
   };
 }

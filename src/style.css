@@ -416,6 +416,39 @@ body {
   color: #9ad4ff;
 }
 
+.kind-pill {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-right: 6px;
+}
+
+.kind-pill.preview {
+  background: rgba(154, 212, 255, 0.2);
+  color: #9ad4ff;
+}
+
+.kind-pill.result {
+  background: rgba(216, 181, 111, 0.2);
+  color: #d8b56f;
+}
+
+.result.preview.hazard.ocean .outcome {
+  color: #8ee7f5;
+}
+
+.result.preview.hazard.bunker .outcome {
+  color: #f0d59a;
+}
+
+.result.preview.hazard.woods .outcome,
+.result.preview.hazard.short .outcome {
+  color: #f3c48a;
+}
+
 .nums b {
   font-size: 17px;
 }
