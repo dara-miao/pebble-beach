@@ -852,6 +852,38 @@ body {
   z-index: 5;
 }
 
+.mark {
+  position: fixed;
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 4;
+  width: 140px;
+  opacity: 0.63;
+  line-height: 0;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.mark img {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+  filter: brightness(0) invert(1) sepia(0.18) saturate(0.28);
+}
+
+.mark:hover,
+.mark:focus-visible {
+  opacity: 0.92;
+  text-decoration: none;
+}
+
+@media (max-width: 720px) {
+  .mark {
+    width: 110px;
+  }
+}
+
 @media (min-width: 720px) {
   .juice {
     padding-left: min(360px, 34vw);
