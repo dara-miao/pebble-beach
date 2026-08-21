@@ -368,7 +368,7 @@ function bookListHtml(play: PlayHudView, shot: ShotHudInfo | undefined, cardYard
         return `<li><span>${h.label}</span><b>${extra}</b></li>`;
       })
       .join("")}
-    <li><span>Card</span><b>${cardYards} yds</b></li>
+    <li><span>Hole</span><b>${cardYards} yds</b></li>
   `;
 }
 

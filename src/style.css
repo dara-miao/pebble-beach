@@ -230,7 +230,7 @@ body {
 
 .stats em,
 .nums em,
-.book li span {
+.book-list span {
   font-style: normal;
 }
 
@@ -764,22 +764,23 @@ body {
   background: #0c1924;
 }
 
-.book ul {
+.book-list {
   list-style: none;
   display: flex;
   flex-direction: column;
   gap: 7px;
 }
 
-.book li {
+.book-list li {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: 12px;
   font-size: 12px;
   color: #c9c2b4;
 }
 
-.book b {
+.book-list b {
   color: #fff;
   white-space: nowrap;
   font-weight: 600;
